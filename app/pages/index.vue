@@ -64,7 +64,6 @@ const {
   error,
 } = await useFetch<CalendarFeed>("/api/calendar/events", {
   query: computed(() => ({ from: fromISO.value, to: toISO.value })),
-  watch: [fromISO],
 });
 
 // ── Projects ──────────────────────────────────────────────────────────────

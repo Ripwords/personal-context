@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 
 export interface CalEvent {
   id: string;
@@ -85,9 +85,21 @@ function labelDate(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-const today = new Date();
+const today = ref(new Date());
+let todayInterval: ReturnType<typeof setInterval> | undefined;
+
+onMounted(() => {
+  todayInterval = setInterval(() => {
+    today.value = new Date();
+  }, 60_000);
+});
+
+onBeforeUnmount(() => {
+  clearInterval(todayInterval);
+});
+
 function isToday(d: Date): boolean {
-  return isSameDay(d, today);
+  return isSameDay(d, today.value);
 }
 </script>
 
