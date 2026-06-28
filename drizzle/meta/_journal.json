@@ -8,6 +8,13 @@
       "when": 1782652042594,
       "tag": "0000_pale_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782656276581,
+      "tag": "0001_common_scarlet_witch",
+      "breakpoints": true
     }
   ]
 }
