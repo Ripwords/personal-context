@@ -1,5 +1,5 @@
 import { and, gte, lt, isNull, eq, desc } from "drizzle-orm";
-import { type Db } from "../client";
+import { type Db, type DbOrTx } from "../client";
 import {
   dumps,
   todos,
@@ -19,7 +19,7 @@ export async function createDump(db: Db, text: string): Promise<Dump> {
   return row!;
 }
 
-export async function createTodo(db: Db, input: NewTodo): Promise<Todo> {
+export async function createTodo(db: DbOrTx, input: NewTodo): Promise<Todo> {
   const [row] = await db.insert(todos).values(input).returning();
   return row!;
 }
@@ -44,7 +44,7 @@ export async function listScheduledTodosInRange(
     .orderBy(todos.scheduledStart);
 }
 
-export async function createEvent(db: Db, input: NewEventRow): Promise<EventRow> {
+export async function createEvent(db: DbOrTx, input: NewEventRow): Promise<EventRow> {
   const [row] = await db.insert(events).values(input).returning();
   return row!;
 }
@@ -61,7 +61,7 @@ export async function listEventsInRange(
     .orderBy(events.startsAt);
 }
 
-export async function logActivity(db: Db, input: NewActivity): Promise<Activity> {
+export async function logActivity(db: DbOrTx, input: NewActivity): Promise<Activity> {
   const [row] = await db.insert(activities).values(input).returning();
   return row!;
 }

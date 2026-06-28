@@ -1,6 +1,6 @@
 import { generateText, stepCountIs } from "ai";
 import type { LanguageModel } from "ai";
-import type { Db } from "../db/client";
+import type { Db, DbOrTx } from "../db/client";
 import type { Project } from "../db/schema";
 import { createDump, createTodo, createEvent, logActivity } from "../db/queries/items";
 import { listProjects } from "../db/queries/projects";
@@ -35,7 +35,7 @@ type ToolCall =
  * to a brain-dump; pass `null` for the chat flow.
  */
 export async function createTodoFromInput(
-  db: Db,
+  db: DbOrTx,
   inp: TodoToolInput,
   projects: ReadonlyArray<Project>,
   dumpId: string | null = null,
@@ -74,7 +74,7 @@ export async function createTodoFromInput(
  * if either date is invalid (mirrors the dump-flow behaviour in applyToolCalls).
  */
 export async function createEventFromInput(
-  db: Db,
+  db: DbOrTx,
   inp: EventToolInput,
   projects: ReadonlyArray<Project>,
   dumpId: string | null = null,
@@ -133,11 +133,11 @@ export async function applyToolCalls(
     for (const call of calls) {
       if (call.toolName === "create_todo") {
         const inp = call.input as TodoToolInput;
-        const item = await createTodoFromInput(tx as Db, inp, projects, dumpId);
+        const item = await createTodoFromInput(tx, inp, projects, dumpId);
         created.push(item);
       } else if (call.toolName === "create_event") {
         const inp = call.input as EventToolInput;
-        const item = await createEventFromInput(tx as Db, inp, projects, dumpId);
+        const item = await createEventFromInput(tx, inp, projects, dumpId);
         if (item !== null) {
           created.push(item);
         }

@@ -2,6 +2,7 @@
 import { ref, computed } from "vue";
 import { startOfWeek, weekDays, addDays } from "~/composables/useWeek";
 import type { Project } from "~/components/ProjectRail.vue";
+import { authClient } from "~/lib/auth-client";
 
 // ── Week navigation state ─────────────────────────────────────────────────
 
@@ -115,6 +116,13 @@ const scheduledTodos = computed(() => {
 
 const unscheduledTodos = computed(() => feed.value?.unscheduledTodos ?? []);
 
+// ── Sign out ──────────────────────────────────────────────────────────────
+
+async function handleSignOut(): Promise<void> {
+  await authClient.signOut();
+  await navigateTo("/login");
+}
+
 // ── Header label ──────────────────────────────────────────────────────────
 
 const weekLabel = computed(() => {
@@ -223,6 +231,16 @@ const weekLabel = computed(() => {
         >
           Chat
         </NuxtLink>
+        <button
+          type="button"
+          class="px-3 py-1 text-xs font-medium rounded border border-neutral-200 bg-white
+                 text-neutral-600 hover:bg-neutral-50
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+                 motion-safe:transition-colors"
+          @click="handleSignOut"
+        >
+          Sign out
+        </button>
       </div>
 
       <!-- View toggle -->
