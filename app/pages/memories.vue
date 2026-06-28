@@ -63,6 +63,7 @@ async function addMemory(): Promise<void> {
 const editingId = ref<string | null>(null);
 const editContent = ref<string>("");
 const saving = ref<boolean>(false);
+const editError = ref<string>("");
 
 function startEdit(m: Memory): void {
   editingId.value = m.id;
@@ -78,6 +79,7 @@ async function saveEdit(id: string): Promise<void> {
   const content = editContent.value.trim();
   if (!content) return;
   saving.value = true;
+  editError.value = "";
   try {
     await $fetch(`/api/memory/${id}`, { method: "PATCH", body: { content } });
     editingId.value = null;
@@ -87,6 +89,8 @@ async function saveEdit(id: string): Promise<void> {
       const q = searchQuery.value.trim();
       if (q) searchResults.value = await $fetch<Memory[]>(`/api/memory?q=${encodeURIComponent(q)}`);
     }
+  } catch {
+    editError.value = "Failed to save changes.";
   } finally {
     saving.value = false;
   }
@@ -95,16 +99,20 @@ async function saveEdit(id: string): Promise<void> {
 // ── Delete ────────────────────────────────────────────────────────────────
 
 const deletingId = ref<string | null>(null);
+const deleteError = ref<string>("");
 
 async function deleteMemory(id: string): Promise<void> {
   if (!confirm("Delete this memory?")) return;
   deletingId.value = id;
+  deleteError.value = "";
   try {
     await $fetch(`/api/memory/${id}`, { method: "DELETE" });
     await refresh();
     if (searchResults.value !== null) {
       searchResults.value = searchResults.value.filter((m) => m.id !== id);
     }
+  } catch {
+    deleteError.value = "Failed to delete memory.";
   } finally {
     deletingId.value = null;
   }
@@ -201,6 +209,8 @@ function relativeTime(iso: string): string {
           <span v-if="searchQuery.trim()">&nbsp;matching "{{ searchQuery.trim() }}"</span>
         </p>
 
+        <p v-if="deleteError" class="text-xs text-red-600 mb-2">{{ deleteError }}</p>
+
         <!-- Empty state -->
         <div v-if="displayed.length === 0" class="py-16 text-center text-sm text-neutral-400">
           <span v-if="searchQuery.trim()">No memories match your search.</span>
@@ -259,6 +269,7 @@ function relativeTime(iso: string): string {
                 @keydown.ctrl.enter="saveEdit(m.id)"
                 @keydown.escape="cancelEdit"
               />
+              <p v-if="editError" class="text-xs text-red-600">{{ editError }}</p>
               <div class="flex items-center gap-2 justify-end">
                 <button
                   type="button"

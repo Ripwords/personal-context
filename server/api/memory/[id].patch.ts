@@ -22,7 +22,10 @@ export default defineEventHandler(async (event) => {
   const db = getDb();
   try {
     return await updateMemory(db, id, body.content.trim());
-  } catch {
-    throw createError({ statusCode: 404, statusMessage: "memory not found" });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.toLowerCase().includes("not found")) {
+      throw createError({ statusCode: 404, statusMessage: "memory not found" });
+    }
+    throw err;
   }
 });
