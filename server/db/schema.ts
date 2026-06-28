@@ -178,7 +178,7 @@ export const connectionRole = pgEnum("connection_role", ["personal", "work"]);
 
 export const googleConnections = pgTable("google_connections", {
   id: uuid("id").primaryKey().defaultRandom(),
-  accountId: text("account_id").notNull().unique(), // FK to account.id added in migration
+  accountId: text("account_id").notNull().unique().references(() => account.id, { onDelete: "cascade" }),
   role: connectionRole("role").notNull(),
   braindumpCalendarId: text("braindump_calendar_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

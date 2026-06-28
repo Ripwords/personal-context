@@ -26,7 +26,8 @@ export async function setBraindumpCalendarId(
     .set({ braindumpCalendarId: calendarId })
     .where(eq(googleConnections.accountId, accountId))
     .returning();
-  return row!;
+  if (!row) throw new Error(`No google_connections row for accountId ${accountId}`);
+  return row;
 }
 
 export async function listConnections(db: Db): Promise<GoogleConnection[]> {

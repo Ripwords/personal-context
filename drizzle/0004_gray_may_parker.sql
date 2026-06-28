@@ -1,0 +1,1 @@
+ALTER TABLE "google_connections" ADD CONSTRAINT "google_connections_account_id_account_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."account"("id") ON DELETE cascade ON UPDATE no action;

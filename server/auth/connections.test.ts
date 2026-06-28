@@ -27,3 +27,7 @@ test("setBraindumpCalendarId stores the calendar id", async () => {
   const c = await setBraindumpCalendarId(db, "acc1", "cal_123");
   expect(c.braindumpCalendarId).toBe("cal_123");
 });
+
+test("setBraindumpCalendarId throws when no connection exists", async () => {
+  await expect(setBraindumpCalendarId(db, "missing", "cal")).rejects.toThrow(/no google_connections row/i);
+});
