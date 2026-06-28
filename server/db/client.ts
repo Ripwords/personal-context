@@ -2,6 +2,7 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "./schema";
+import { parseEnv } from "../utils/env";
 
 export function makeDb(url: string): NodePgDatabase<typeof schema> {
   // allowExitOnIdle lets `bun test` exit without hanging on idle pool sockets.
@@ -10,3 +11,9 @@ export function makeDb(url: string): NodePgDatabase<typeof schema> {
 }
 
 export type Db = ReturnType<typeof makeDb>;
+
+let _db: Db | undefined;
+export function getDb(): Db {
+  if (!_db) _db = makeDb(parseEnv(process.env).databaseUrl);
+  return _db;
+}

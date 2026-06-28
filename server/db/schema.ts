@@ -9,6 +9,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ── App enums ──────────────────────────────────────────────────────────────
@@ -72,7 +73,9 @@ export const events = pgTable("events", {
   dumpId: uuid("dump_id").references(() => dumps.id),
   syncStatus: eventSyncStatus("sync_status").notNull().default("local"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => ({
+  googleIdentity: uniqueIndex("events_google_identity").on(t.googleAccountId, t.googleEventId),
+}));
 
 export const activities = pgTable("activities", {
   id: uuid("id").primaryKey().defaultRandom(),

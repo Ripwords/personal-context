@@ -1,10 +1,9 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { makeDb } from "../db/client";
+import { getDb } from "../db/client";
 import * as schema from "../db/schema";
-import { parseEnv } from "../utils/env";
 
-const db = makeDb(parseEnv(process.env).databaseUrl);
+const db = getDb();
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),

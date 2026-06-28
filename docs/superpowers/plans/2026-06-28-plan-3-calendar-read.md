@@ -277,22 +277,24 @@ export async function syncConnectionEvents(
     .filter((r): r is NewEventRow => r !== null);
   if (rows.length === 0) return 0;
 
-  await db.batch(
-    rows.map((row) =>
-      db
+  // node-postgres supports interactive transactions — wrap the upserts so a
+  // sync either fully lands or rolls back.
+  await db.transaction(async (tx) => {
+    for (const row of rows) {
+      await tx
         .insert(events)
         .values(row)
         .onConflictDoUpdate({
           target: [events.googleAccountId, events.googleEventId],
           set: { title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, syncStatus: "synced" },
-        }),
-    ) as unknown as Parameters<typeof db.batch>[0],
-  );
+        });
+    }
+  });
   return rows.length;
 }
 ```
 
-> The `db.batch(...)` array typing across the `neon-http | postgres-js` union can be awkward; if the `as unknown as` cast is needed to satisfy the union, keep it minimal and comment it. If `db.batch` is unavailable on the local `postgres-js` driver in your version, fall back to a sequential `for (const row of rows) await db.insert(...).onConflictDoUpdate(...)` loop (single-row writes are safe without a transaction) and note it.
+> Uses `db.transaction()` (available on `drizzle-orm/node-postgres`). No `any`, no casts. The composite-unique upsert target `(googleAccountId, googleEventId)` requires the unique index from Step 1.
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -392,14 +394,315 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Phase 2 — UI shell + live data (expand after the interactive Google login)
+## Phase 2 — UI shell + live data
 
-These are outlined; each will be written to full TDD/bite-sized detail once the live session exists (the UI is far better verified against real data, and the live login is the natural seam). Doc-verification for Nuxt UI v4 + Better Auth Vue client happens in those tasks.
+**Decisions (made for the overnight build):**
+- **Google Calendar access uses plain `fetch`** against the Calendar v3 REST API
+  (`https://www.googleapis.com/calendar/v3/...`) with a `Bearer` token — no
+  `googleapis` dependency (lighter, trivially testable behind the `EventsApi`/
+  `CalendarApi` interfaces already defined).
+- **Token refresh** posts the stored `refresh_token` to Google's token endpoint
+  (`https://oauth2.googleapis.com/token`) with `client_id`/`client_secret` — a
+  concrete `TokenRefresher`. (If Better Auth exposes `auth.api.getAccessToken`,
+  that's an acceptable alternative; the direct endpoint is dependency-free and
+  certain to work.)
+- **Calendar UI is a custom lightweight week grid** (Tailwind), not a heavyweight
+  calendar component — fits the minimal monochrome direction and avoids depending
+  on a Nuxt UI calendar that may not exist in v4. Nuxt UI is used for buttons/
+  inputs/toasts/layout primitives only.
+- **UI verification** is typecheck + a live dev-server smoke (route returns JSON;
+  page renders 200), plus TDD on extracted pure date/layout helpers. (DOM unit
+  tests aren't run under `bun test`.)
 
-- **Task 4 — Live token refresher + sync wrapper + `/api/calendar/events`:** implement `TokenRefresher` via Better Auth (`auth.api.getAccessToken`) or the Google token endpoint (doc-verify); a `googleapis`-backed `EventsApi`; a `GET /api/calendar/events?from&to` route that, for each `getGoogleConnections` entry, refreshes the token, `syncConnectionEvents`, then returns `getCalendarFeed`. Manual verification with both real accounts.
-- **Task 5 — Sign-in / link-account UI:** a minimal page using the Better Auth Vue client (`signIn.social`, `linkSocial`) for "Sign in with Google" + "Add work account", plus a role picker that calls a route wrapping `setConnectionRole`. Doc-verify the Better Auth Vue/Nuxt client.
-- **Task 6 — Three-pane calendar shell:** Nuxt UI v4 layout — left project filter rail, center calendar (week default; day/month toggle), right unscheduled-todo rail; events color-coded by project; consumes `/api/calendar/events`. Doc-verify Nuxt UI v4 calendar/components; respect the visual direction (warm paper, teal primary, per-project accents) + a11y (contrast, focus, reduced-motion).
-- **Task 7 — Live end-to-end verification:** sign in (personal) → link (work) → set roles → create Braindump calendar (Plan 2 `ensureBraindumpCalendar` with the real `googleapis` client) → confirm real events from both accounts render color-coded in the week view.
+### Task 4: Live TokenRefresher + EventsApi (fetch) + `/api/calendar/events`
+
+**Files:**
+- Create: `server/calendar-sync/google-rest.ts` (fetch-based `TokenRefresher` + `EventsApi`)
+- Create: `server/calendar-sync/google-rest.test.ts`
+- Create: `server/api/calendar/events.get.ts`
+- Create: `server/utils/session.ts` (resolve the Better Auth session in a Nitro handler)
+
+**Interfaces:**
+- Consumes: `getGoogleConnections` (Plan 2), `getFreshAccessToken`/`TokenRefresher` (P3 Task 1), `syncConnectionEvents`/`EventsApi` (P3 Task 2), `getCalendarFeed` (P3 Task 3), `auth` (Plan 2).
+- Produces:
+  - `makeGoogleTokenRefresher(clientId: string, clientSecret: string, fetchImpl?: typeof fetch): TokenRefresher`
+  - `makeGoogleEventsApi(fetchImpl?: typeof fetch): EventsApi`
+  - `GET /api/calendar/events?from=ISO&to=ISO` → `CalendarFeed` JSON (401 if no session).
+
+- [ ] **Step 1: Failing test for the fetch-based refresher + events api (injected fake `fetch`)**
+
+```ts
+// server/calendar-sync/google-rest.test.ts
+import { test, expect } from "bun:test";
+import { makeGoogleTokenRefresher, makeGoogleEventsApi } from "./google-rest";
+
+test("token refresher posts refresh_token and returns access token", async () => {
+  const fakeFetch = (async (_url: string, init?: RequestInit) => {
+    const body = String(init?.body ?? "");
+    expect(body).toContain("grant_type=refresh_token");
+    expect(body).toContain("refresh_token=rt_1");
+    return new Response(JSON.stringify({ access_token: "at_new", expires_in: 3600 }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const refresh = makeGoogleTokenRefresher("cid", "secret", fakeFetch);
+  const res = await refresh("rt_1");
+  expect(res.accessToken).toBe("at_new");
+  expect(res.expiresAt).toBeGreaterThan(0);
+});
+
+test("events api lists and returns raw items array", async () => {
+  const fakeFetch = (async (url: string, init?: RequestInit) => {
+    expect(String(url)).toContain("/calendars/primary/events");
+    expect((init?.headers as Record<string,string>).Authorization).toBe("Bearer at_x");
+    return new Response(JSON.stringify({ items: [{ id: "g1", summary: "X", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T10:00:00Z" } }] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const api = makeGoogleEventsApi(fakeFetch);
+  const items = await api.list({ accessToken: "at_x", calendarId: "primary", timeMin: "2026-07-01T00:00:00Z", timeMax: "2026-07-02T00:00:00Z" });
+  expect(items.length).toBe(1);
+  expect(items[0]!.id).toBe("g1");
+});
+```
+
+- [ ] **Step 2: Run → fail.** `bun test server/calendar-sync/google-rest.test.ts` → cannot find module.
+
+- [ ] **Step 3: Implement `google-rest.ts`**
+
+```ts
+// server/calendar-sync/google-rest.ts
+import type { TokenRefresher } from "./access-token";
+import type { EventsApi, RawGoogleEvent } from "./sync-events";
+
+export function makeGoogleTokenRefresher(
+  clientId: string,
+  clientSecret: string,
+  fetchImpl: typeof fetch = fetch,
+): TokenRefresher {
+  return async (refreshToken: string) => {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    });
+    const res = await fetchImpl("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    if (!res.ok) throw new Error(`token refresh failed: ${res.status}`);
+    const json = (await res.json()) as { access_token: string; expires_in: number };
+    return { accessToken: json.access_token, expiresAt: Date.now() + json.expires_in * 1000 };
+  };
+}
+
+export function makeGoogleEventsApi(fetchImpl: typeof fetch = fetch): EventsApi {
+  return {
+    async list({ accessToken, calendarId, timeMin, timeMax }) {
+      const params = new URLSearchParams({
+        timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "250",
+      });
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`;
+      const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) throw new Error(`calendar list failed: ${res.status}`);
+      const json = (await res.json()) as { items?: RawGoogleEvent[] };
+      return json.items ?? [];
+    },
+  };
+}
+```
+
+- [ ] **Step 4: Run → pass.** `bun test server/calendar-sync/google-rest.test.ts` → 2 pass.
+
+- [ ] **Step 5: Session helper** (doc-verify Better Auth's server session call against <https://www.better-auth.com/docs/concepts/session-management>; the shape below is the common one):
+
+```ts
+// server/utils/session.ts
+import type { H3Event } from "h3";
+import { getHeaders } from "h3";
+import { auth } from "../auth";
+
+export async function getSession(event: H3Event) {
+  // Better Auth resolves a session from request headers. Confirm method name in docs.
+  return auth.api.getSession({ headers: new Headers(getHeaders(event) as Record<string, string>) });
+}
+```
+
+- [ ] **Step 6: The route** `server/api/calendar/events.get.ts`
+
+```ts
+import { defineEventHandler, getQuery, createError } from "h3";
+import { makeDb } from "../../db/client";
+import { parseEnv } from "../../utils/env";
+import { getSession } from "../../utils/session";
+import { getGoogleConnections } from "../../auth/google-credentials";
+import { getFreshAccessToken } from "../../calendar-sync/access-token";
+import { syncConnectionEvents } from "../../calendar-sync/sync-events";
+import { makeGoogleTokenRefresher, makeGoogleEventsApi } from "../../calendar-sync/google-rest";
+import { getCalendarFeed } from "../../db/queries/calendar-feed";
+
+export default defineEventHandler(async (event) => {
+  const session = await getSession(event);
+  if (!session) throw createError({ statusCode: 401, statusMessage: "not authenticated" });
+
+  const q = getQuery(event);
+  const from = new Date(String(q.from));
+  const to = new Date(String(q.to));
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    throw createError({ statusCode: 400, statusMessage: "invalid from/to" });
+  }
+
+  const db = makeDb(parseEnv(process.env).databaseUrl);
+  const refresh = makeGoogleTokenRefresher(
+    process.env.GOOGLE_CLIENT_ID ?? "",
+    process.env.GOOGLE_CLIENT_SECRET ?? "",
+  );
+  const api = makeGoogleEventsApi();
+
+  for (const conn of await getGoogleConnections(db)) {
+    try {
+      const accessToken = await getFreshAccessToken(conn, Date.now(), refresh);
+      await syncConnectionEvents(db, conn, accessToken, api, from, to);
+    } catch (err) {
+      // One bad account shouldn't blank the whole calendar; log and continue.
+      console.error(`sync failed for account ${conn.accountId}:`, err);
+    }
+  }
+  return getCalendarFeed(db, from, to);
+});
+```
+
+- [ ] **Step 7: Typecheck + full suite.** `bunx nuxi typecheck` → 0; `bun test` → all pass (32). Commit:
+
+```bash
+git add server/calendar-sync/google-rest.ts server/calendar-sync/google-rest.test.ts server/api/calendar/events.get.ts server/utils/session.ts
+git commit -m "feat: google REST token refresh + events api + /api/calendar/events route
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+### Task 5: Auth UI (sign in + link work account + role) — Better Auth Vue client
+
+**Files:**
+- Create: `app/lib/auth-client.ts`
+- Create: `app/pages/login.vue`
+- Create: `app/pages/connections.vue`
+- Create: `server/api/connections/role.post.ts` (wraps `setConnectionRole`)
+- Create: `server/api/connections/index.get.ts` (lists connections for the UI)
+
+**Interfaces:** Produces a Better Auth Vue client (`authClient` with `signIn.social`, `linkSocial`, `useSession`), a login page, a connections page (link work account + set personal/work role), and the two routes.
+
+- [ ] **Step 1: Doc-verify + create the auth client.** Confirm `better-auth/vue` `createAuthClient` API at <https://www.better-auth.com/docs/integrations/nuxt> and <https://www.better-auth.com/docs/concepts/client>. Baseline:
+
+```ts
+// app/lib/auth-client.ts
+import { createAuthClient } from "better-auth/vue";
+export const authClient = createAuthClient();
+export const { signIn, signOut, useSession } = authClient;
+```
+
+- [ ] **Step 2: `login.vue`** — minimal B&W; a single "Continue with Google" button calling `authClient.signIn.social({ provider: "google", callbackURL: "/" })`. Use a Nuxt UI `UButton`. Monochrome styling per spec §7.
+
+```vue
+<script setup lang="ts">
+import { authClient } from "~/lib/auth-client";
+async function signin() {
+  await authClient.signIn.social({ provider: "google", callbackURL: "/" });
+}
+</script>
+<template>
+  <main class="min-h-dvh flex flex-col items-center justify-center gap-6 bg-neutral-50 text-neutral-900">
+    <h1 class="text-3xl font-semibold tracking-tight">Braindump</h1>
+    <p class="text-neutral-500 text-sm">Dump everything. Wake up to a plan.</p>
+    <UButton color="neutral" size="lg" @click="signin">Continue with Google</UButton>
+  </main>
+</template>
+```
+
+- [ ] **Step 3: `connections.vue`** — lists linked Google accounts, a "Add work account" button calling `authClient.linkSocial({ provider: "google", callbackURL: "/connections" })` (doc-verify `linkSocial`), and a personal/work toggle per account that POSTs `/api/connections/role`. Minimal B&W list, hairline dividers.
+
+- [ ] **Step 4: routes**
+
+```ts
+// server/api/connections/index.get.ts
+import { defineEventHandler, createError } from "h3";
+import { makeDb } from "../../db/client";
+import { parseEnv } from "../../utils/env";
+import { getSession } from "../../utils/session";
+import { getGoogleConnections } from "../../auth/google-credentials";
+
+export default defineEventHandler(async (event) => {
+  if (!(await getSession(event))) throw createError({ statusCode: 401 });
+  const db = makeDb(parseEnv(process.env).databaseUrl);
+  return (await getGoogleConnections(db)).map((c) => ({
+    accountId: c.accountId, role: c.role, braindumpCalendarId: c.braindumpCalendarId,
+  }));
+});
+```
+
+```ts
+// server/api/connections/role.post.ts
+import { defineEventHandler, readBody, createError } from "h3";
+import { makeDb } from "../../db/client";
+import { parseEnv } from "../../utils/env";
+import { getSession } from "../../utils/session";
+import { setConnectionRole } from "../../auth/connections";
+
+export default defineEventHandler(async (event) => {
+  if (!(await getSession(event))) throw createError({ statusCode: 401 });
+  const body = await readBody<{ accountId: string; role: "personal" | "work" }>(event);
+  if (!body?.accountId || (body.role !== "personal" && body.role !== "work")) {
+    throw createError({ statusCode: 400, statusMessage: "accountId + role required" });
+  }
+  const db = makeDb(parseEnv(process.env).databaseUrl);
+  return setConnectionRole(db, body.accountId, body.role);
+});
+```
+
+- [ ] **Step 5: Typecheck + commit.** `bunx nuxi typecheck` → 0. (Routes have logic but live-session-dependent; verified at Task 7 live smoke.) Commit the auth UI.
+
+### Task 6: Three-pane minimal calendar shell
+
+**Files:**
+- Create: `app/composables/useWeek.ts` (pure date helpers — TDD)
+- Create: `app/composables/useWeek.test.ts`
+- Create: `app/pages/index.vue` (three-pane shell)
+- Create: `app/components/CalendarWeek.vue`, `app/components/UnscheduledRail.vue`, `app/components/ProjectRail.vue`
+
+**Interfaces:** Produces pure helpers `startOfWeek(d)`, `weekDays(d)` (7 Dates), `addDays(d,n)`; and the calendar page consuming `/api/calendar/events`.
+
+- [ ] **Step 1: TDD the pure date helpers** (`useWeek.test.ts` → fail → implement → pass):
+
+```ts
+// app/composables/useWeek.test.ts
+import { test, expect } from "bun:test";
+import { startOfWeek, weekDays, addDays } from "./useWeek";
+test("startOfWeek returns Monday 00:00 for a mid-week date", () => {
+  const wed = new Date("2026-07-01T15:00:00Z"); // Wed
+  const mon = startOfWeek(wed);
+  expect(mon.getUTCDay()).toBe(1); // Monday
+});
+test("weekDays returns 7 consecutive days", () => {
+  const days = weekDays(new Date("2026-07-01T00:00:00Z"));
+  expect(days.length).toBe(7);
+  expect(addDays(days[0]!, 6).getUTCDate()).toBe(days[6]!.getUTCDate());
+});
+```
+
+Implement `useWeek.ts` with `addDays`, `startOfWeek` (Monday-based), `weekDays`. Keep pure (no Vue) so `bun test` covers them.
+
+- [ ] **Step 2: Build the shell** `app/pages/index.vue` — three panes (left `ProjectRail`, center `CalendarWeek`, right `UnscheduledRail`), a header with week nav (‹ Today ›) and day/week/month toggle (week default; day/month can be simple stubs that still render). Fetch `/api/calendar/events?from&to` with TanStack Query (`@tanstack/vue-query`) per the user's CLAUDE.md (no `fetch`+`useEffect`/`onMounted`); if not installed, `bun add @tanstack/vue-query` and register the plugin. Minimal monochrome: `bg-neutral-50`, `text-neutral-900`, hairline `border-neutral-200` dividers, generous whitespace, no shadows. Projects shown as text labels + a thin left-border tick using the project color token.
+
+- [ ] **Step 3: `CalendarWeek.vue`** — a 7-column grid (Mon–Sun) with hour rows; render events + scheduled todos as blocks positioned by start/end; grayscale, project label + left-tick. `UnscheduledRail.vue` — a vertical list of unscheduled todos (drag wiring is Plan 6). `ProjectRail.vue` — project filter list (checkboxes/toggles).
+
+- [ ] **Step 4: Typecheck + full suite.** `bunx nuxi typecheck` → 0; `bun test` → all pass (date helpers included). Commit the shell.
+
+### Task 7: Live end-to-end smoke (interactive — needs the user's Google login)
+
+> The one step that needs the human. Do as much programmatically as possible; document the rest for the user.
+
+- [ ] **Step 1:** `bun run dev`. Confirm `/login` renders (200) and `/api/calendar/events?from=...&to=...` returns **401** when logged out (proves the auth gate). Record both.
+- [ ] **Step 2 (USER):** open `/login`, sign in with the personal Google account; then `/connections`, "Add work account" (sign in with the work account); set one `personal`, one `work`. Verify two `account` rows + two `google_connections` rows via psql.
+- [ ] **Step 3 (USER/auto):** with a session cookie, GET `/api/calendar/events?from&to` → 200 with real events from both calendars; confirm `events` rows were upserted. Provision the Braindump calendar via `ensureBraindumpCalendar` + a real `CalendarApi` (fetch `POST /calendar/v3/calendars`).
+- [ ] **Step 4:** confirm the week view renders the real events. Record results in the report.
 
 ---
 
