@@ -8,7 +8,7 @@
     "typecheck": "nuxt typecheck",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "bun server/db/migrate.ts",
     "test": "bun test"
   },
   "devDependencies": {
