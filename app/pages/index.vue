@@ -167,16 +167,27 @@ const weekLabel = computed(() => {
         {{ weekLabel }}
       </h1>
 
-      <!-- Dump affordance -->
-      <NuxtLink
-        to="/dump"
-        class="px-3 py-1 text-xs font-medium rounded border border-neutral-200 bg-white
-               text-neutral-600 hover:bg-neutral-50
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
-               motion-safe:transition-colors"
-      >
-        Dump
-      </NuxtLink>
+      <!-- Nav affordances -->
+      <div class="flex items-center gap-2">
+        <NuxtLink
+          to="/dump"
+          class="px-3 py-1 text-xs font-medium rounded border border-neutral-200 bg-white
+                 text-neutral-600 hover:bg-neutral-50
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+                 motion-safe:transition-colors"
+        >
+          Dump
+        </NuxtLink>
+        <NuxtLink
+          to="/wind-down"
+          class="px-3 py-1 text-xs font-medium rounded border border-neutral-200 bg-white
+                 text-neutral-600 hover:bg-neutral-50
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+                 motion-safe:transition-colors"
+        >
+          Wind down
+        </NuxtLink>
+      </div>
 
       <!-- View toggle -->
       <div class="flex items-center border border-neutral-200 rounded overflow-hidden">

@@ -49,6 +49,16 @@ const windDownSchema = z.object({
   ).describe("Proposed time blocks for tomorrow — no overlaps, realistic working hours"),
 });
 
+// ── Public Zod exports for API routes ─────────────────────────────────────
+
+export const blockSchema = z.object({
+  todoId: z.string(),
+  startsAt: z.string(),
+  endsAt: z.string(),
+});
+
+export const blocksSchema = z.array(blockSchema);
+
 // ── summarizeDay ───────────────────────────────────────────────────────────
 
 /**
