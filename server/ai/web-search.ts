@@ -27,53 +27,68 @@ export function makeWebSearch(
 ): (query: string) => Promise<WebSearchResult> {
   return async (query: string): Promise<WebSearchResult> => {
     if (env.TAVILY_API_KEY) {
-      const res = await fetchImpl("https://api.tavily.com/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: env.TAVILY_API_KEY, query, max_results: 5 }),
-      });
+      try {
+        const res = await fetchImpl("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_key: env.TAVILY_API_KEY, query, max_results: 5 }),
+        });
 
-      if (!res.ok) {
-        return { configured: true, results: [], note: `web search failed: ${res.status}` };
+        if (!res.ok) {
+          return { configured: true, results: [], note: `web search failed: ${res.status}` };
+        }
+
+        const data = (await res.json()) as TavilyResponse;
+        return {
+          configured: true,
+          results: data.results.map((r) => ({ title: r.title, url: r.url, snippet: r.content })),
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { configured: true, results: [], note: `web search failed: ${message}` };
       }
-
-      const data = (await res.json()) as TavilyResponse;
-      return {
-        configured: true,
-        results: data.results.map((r) => ({ title: r.title, url: r.url, snippet: r.content })),
-      };
     }
 
     if (env.BRAVE_API_KEY) {
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`;
-      const res = await fetchImpl(url, {
-        headers: { "X-Subscription-Token": env.BRAVE_API_KEY },
-      });
+      try {
+        const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`;
+        const res = await fetchImpl(url, {
+          headers: { "X-Subscription-Token": env.BRAVE_API_KEY },
+        });
 
-      if (!res.ok) {
-        return { configured: true, results: [], note: `web search failed: ${res.status}` };
+        if (!res.ok) {
+          return { configured: true, results: [], note: `web search failed: ${res.status}` };
+        }
+
+        const data = (await res.json()) as BraveResponse;
+        return {
+          configured: true,
+          results: data.web.results.map((r) => ({ title: r.title, url: r.url, snippet: r.description })),
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { configured: true, results: [], note: `web search failed: ${message}` };
       }
-
-      const data = (await res.json()) as BraveResponse;
-      return {
-        configured: true,
-        results: data.web.results.map((r) => ({ title: r.title, url: r.url, snippet: r.description })),
-      };
     }
 
     if (env.SEARXNG_URL) {
-      const url = `${env.SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json`;
-      const res = await fetchImpl(url);
+      try {
+        const url = `${env.SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json`;
+        const res = await fetchImpl(url);
 
-      if (!res.ok) {
-        return { configured: true, results: [], note: `web search failed: ${res.status}` };
+        if (!res.ok) {
+          return { configured: true, results: [], note: `web search failed: ${res.status}` };
+        }
+
+        const data = (await res.json()) as SearxngResponse;
+        return {
+          configured: true,
+          results: data.results.map((r) => ({ title: r.title, url: r.url, snippet: r.content })),
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { configured: true, results: [], note: `web search failed: ${message}` };
       }
-
-      const data = (await res.json()) as SearxngResponse;
-      return {
-        configured: true,
-        results: data.results.map((r) => ({ title: r.title, url: r.url, snippet: r.content })),
-      };
     }
 
     return {

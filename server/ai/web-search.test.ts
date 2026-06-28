@@ -120,6 +120,23 @@ test("SearXNG: returns mapped WebResults when SEARXNG_URL is set", async () => {
   expect(calledWith[0]).toContain("format=json");
 });
 
+// --- network throw degrades gracefully (ECONNREFUSED / DNS / timeout) ---
+test("Tavily: fetch throws a network error → resolves to configured:true with empty results and note matching /failed/i", async () => {
+  const fakeFetch = async (): Promise<Response> => {
+    throw new Error("ECONNREFUSED");
+  };
+
+  const search = makeWebSearch(
+    { TAVILY_API_KEY: "test-tavily-key" },
+    fakeFetch as unknown as typeof fetch,
+  );
+  const result = await search("network error query");
+
+  expect(result.configured).toBe(true);
+  expect(result.results).toHaveLength(0);
+  expect(result.note).toMatch(/failed/i);
+});
+
 // --- non-ok HTTP response degrades gracefully ---
 test("Tavily: non-ok HTTP response returns configured:true with empty results and note", async () => {
   const fakeFetch = async (): Promise<Response> => {
