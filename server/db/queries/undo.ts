@@ -30,10 +30,14 @@ export async function undoLastActivity(db: Db): Promise<UndoResult> {
 
   const { entityType, entityId } = target;
 
+  if (entityType !== "todo" && entityType !== "event") {
+    return { undone: false };
+  }
+
   await db.transaction(async (tx) => {
     if (entityType === "todo") {
       await tx.delete(todos).where(eq(todos.id, entityId));
-    } else if (entityType === "event") {
+    } else {
       await tx.delete(events).where(eq(events.id, entityId));
     }
     await tx.insert(activities).values({ action: "undo", entityType, entityId });

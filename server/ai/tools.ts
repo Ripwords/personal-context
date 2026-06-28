@@ -14,8 +14,8 @@ export const eventToolSchema = z.object({
   title: z.string().describe("Short title for the calendar event"),
   notes: z.string().optional().describe("Optional extra details or context"),
   project: z.string().optional().describe("Project name (exact match preferred) or omit if none fits"),
-  startsAt: z.string().describe("ISO 8601 start datetime for the event"),
-  endsAt: z.string().describe("ISO 8601 end datetime for the event"),
+  startsAt: z.string().datetime().describe("ISO 8601 start datetime for the event"),
+  endsAt: z.string().datetime().describe("ISO 8601 end datetime for the event"),
   confidence: z.number().min(0).max(1).describe("Confidence 0..1 that this is a real calendar event"),
 });
 

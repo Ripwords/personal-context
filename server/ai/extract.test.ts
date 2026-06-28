@@ -126,6 +126,39 @@ test("applyToolCalls: creates a calendar event with correct dates", async () => 
   expect(acts[0]!.entityType).toBe("event");
 });
 
+test("applyToolCalls: event with invalid startsAt is skipped, valid todo in same batch still inserts", async () => {
+  const { createDump } = await import("../db/queries/items");
+  const dump = await createDump(db, "dentist tomorrow; finish report");
+
+  const calls = [
+    {
+      toolName: "create_event",
+      input: {
+        title: "dentist",
+        startsAt: "not-a-date",
+        endsAt: "2026-07-01T10:00:00.000Z",
+        confidence: 0.9,
+      },
+    },
+    {
+      toolName: "create_todo",
+      input: { title: "finish report", confidence: 0.85 },
+    },
+  ];
+
+  const created = await applyToolCalls(db, dump.id, calls, []);
+
+  // Only the todo should be created; the bad event is skipped
+  expect(created).toHaveLength(1);
+  expect(created[0]!.kind).toBe("todo");
+  expect(created[0]!.title).toBe("finish report");
+
+  // Only 1 activity row (for the todo), not 2
+  const acts = await listActivity(db);
+  expect(acts).toHaveLength(1);
+  expect(acts[0]!.entityType).toBe("todo");
+});
+
 test("applyToolCalls: mixed calls produce multiple items and activity rows", async () => {
   const { createDump } = await import("../db/queries/items");
   const dump = await createDump(db, "finish report and meet with client friday");

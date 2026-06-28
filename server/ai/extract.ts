@@ -74,13 +74,18 @@ export async function applyToolCalls(
         });
       } else if (call.toolName === "create_event") {
         const inp = call.input as EventToolInput;
+        const startsAt = new Date(inp.startsAt);
+        const endsAt = new Date(inp.endsAt);
+        if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+          continue;
+        }
         const projectId = resolveProject(inp.project, projects);
         const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
 
         const event = await createEvent(tx as Db, {
           title: inp.title,
-          startsAt: new Date(inp.startsAt),
-          endsAt: new Date(inp.endsAt),
+          startsAt,
+          endsAt,
           projectId,
           dumpId,
         });
@@ -122,7 +127,12 @@ export async function extractFromDump(
       ? projects.map((p) => p.name).join(", ")
       : "(none)";
 
+  const now = new Date();
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   const system = `You are a personal assistant helping to extract structured items from a brain dump.
+
+The current datetime is ${now.toISOString()} (timezone ${timezone}). Resolve all relative dates and times (today, tomorrow, Friday, this weekend, 3pm) against it, and output absolute ISO 8601 datetimes.
 
 Extract concrete, actionable todos and calendar events from the user's text.
 For each item:

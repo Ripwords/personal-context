@@ -5,6 +5,8 @@ import { truncateAll } from "../server/db/test-helpers";
 import { seedDefaultProjects } from "../server/db/seed";
 import { makeModel } from "../server/ai/model";
 import { extractFromDump } from "../server/ai/extract";
+import { eq, inArray } from "drizzle-orm";
+import { events as eventsTable } from "../server/db/schema";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("TEST_DATABASE_URL not set");
@@ -22,9 +24,22 @@ console.log("\nDUMP:\n" + dump + "\n");
 const t0 = Date.now();
 const res = await extractFromDump(db, makeModel(), dump);
 console.log(`extracted ${res.created.length} items in ${Date.now() - t0}ms:\n`);
+
+// Fetch event rows so we can show ISO datetimes
+const eventIds = res.created.filter((c) => c.kind === "event").map((c) => c.id);
+const eventRows =
+  eventIds.length > 0
+    ? await db.select().from(eventsTable).where(inArray(eventsTable.id, eventIds))
+    : [];
+const eventById = new Map(eventRows.map((e) => [e.id, e]));
+
 for (const c of res.created) {
+  const ev = c.kind === "event" ? eventById.get(c.id) : undefined;
+  const datePart = ev
+    ? `  startsAt=${ev.startsAt.toISOString()} endsAt=${ev.endsAt.toISOString()}`
+    : "";
   console.log(
-    `  [${c.kind}] ${c.title}  · project=${c.projectId ? "yes" : "none"} · conf=${c.confidence ?? "?"}${c.lowConfidence ? " (needs review)" : ""}`,
+    `  [${c.kind}] ${c.title}  · project=${c.projectId ? "yes" : "none"} · conf=${c.confidence ?? "?"}${c.lowConfidence ? " (needs review)" : ""}${datePart}`,
   );
 }
 
