@@ -34,6 +34,11 @@ export async function listDocuments(db: Db): Promise<Document[]> {
   return db.select().from(document).orderBy(desc(document.createdAt));
 }
 
+export async function getDocumentById(db: Db, id: string): Promise<Document | undefined> {
+  const rows = await db.select().from(document).where(eq(document.id, id)).limit(1);
+  return rows[0];
+}
+
 export async function deleteDocument(db: Db, id: string): Promise<void> {
   await db.delete(document).where(eq(document.id, id));
 }

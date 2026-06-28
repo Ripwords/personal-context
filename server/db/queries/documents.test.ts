@@ -4,6 +4,7 @@ import {
   createDocumentWithChunks,
   listDocuments,
   deleteDocument,
+  getDocumentById,
   searchDocuments,
 } from "./documents";
 
@@ -106,6 +107,21 @@ describe("searchDocuments", () => {
     expect(results[0]!.filename).toBe("readme.md");
     expect(results[0]!.chunkIndex).toBe(0);
     expect(results[0]!.content).toContain("elephant");
+  });
+});
+
+describe("getDocumentById", () => {
+  test("returns the document when it exists", async () => {
+    const { documentId } = await createDocumentWithChunks(db, sampleDoc, ["hello"]);
+    const doc = await getDocumentById(db, documentId);
+    expect(doc).toBeDefined();
+    expect(doc!.id).toBe(documentId);
+    expect(doc!.filename).toBe("test.txt");
+  });
+
+  test("returns undefined when document does not exist", async () => {
+    const doc = await getDocumentById(db, "00000000-0000-0000-0000-000000000000");
+    expect(doc).toBeUndefined();
   });
 });
 

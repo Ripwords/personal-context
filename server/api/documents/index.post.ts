@@ -53,18 +53,24 @@ export default defineEventHandler(async (event) => {
 
   await Bun.write(storagePath, bytes);
 
-  // Chunk and store
+  // Chunk and store — unlink the file if the DB call fails to avoid orphans
   const chunks = chunkText(text);
-  const result = await createDocumentWithChunks(
-    getDb(),
-    {
-      filename: safeName,
-      mimeType,
-      sizeBytes: bytes.length,
-      storagePath,
-    },
-    chunks,
-  );
+  let result: { documentId: string; chunks: number };
+  try {
+    result = await createDocumentWithChunks(
+      getDb(),
+      {
+        filename: safeName,
+        mimeType,
+        sizeBytes: bytes.length,
+        storagePath,
+      },
+      chunks,
+    );
+  } catch (err) {
+    await unlink(storagePath).catch(() => {});
+    throw err;
+  }
 
   return {
     documentId: result.documentId,
