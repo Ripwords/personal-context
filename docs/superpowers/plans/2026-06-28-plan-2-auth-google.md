@@ -218,6 +218,7 @@ Expected: FAIL — cannot find module `./[...all]`.
 
 ```ts
 // server/api/auth/[...all].ts
+import { defineEventHandler, toWebRequest } from "h3";
 import { auth } from "../../auth";
 
 export default defineEventHandler((event) => {
@@ -225,7 +226,7 @@ export default defineEventHandler((event) => {
 });
 ```
 
-(`defineEventHandler` and `toWebRequest` are Nitro/h3 auto-imports. If Better Auth ships a Nuxt/h3 helper, prefer it and note the change.)
+Import `defineEventHandler`/`toWebRequest` **explicitly from `h3`** (not the Nitro auto-import) so the file is importable under plain `bun test` (no Nuxt runtime in tests). `h3` is already present via Nuxt. If Better Auth ships a Nuxt/h3 helper, prefer it and note the change. Confirm the handler property name matches what Task 1 verified.
 
 - [ ] **Step 4: Run test to verify it passes**
 
