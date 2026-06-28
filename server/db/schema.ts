@@ -6,6 +6,7 @@ import {
   text,
   real,
   boolean,
+  integer,
   timestamp,
   jsonb,
   index,
@@ -84,6 +85,32 @@ export const memory = pgTable("memory", {
   source: memorySource("source").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Document RAG tables ────────────────────────────────────────────────────
+
+export const document = pgTable("document", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  storagePath: text("storage_path").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const documentChunk = pgTable("document_chunk", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id").notNull().references(() => document.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  // NOTE: "search" tsvector GENERATED ALWAYS AS (to_tsvector('english', "content")) STORED
+  // is hand-added to the generated migration (NOT tracked by Drizzle — it's DB-managed).
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Document = typeof document.$inferSelect;
+export type NewDocument = typeof document.$inferInsert;
+export type DocumentChunk = typeof documentChunk.$inferSelect;
+export type NewDocumentChunk = typeof documentChunk.$inferInsert;
 
 export const activities = pgTable("activities", {
   id: uuid("id").primaryKey().defaultRandom(),
