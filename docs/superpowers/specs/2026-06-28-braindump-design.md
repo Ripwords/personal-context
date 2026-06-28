@@ -40,6 +40,16 @@ shows events, scheduled todos, and unscheduled "things to do" in one place.
   created vs. completed, completion rate, scheduled vs. unscheduled ratio,
   per-project breakdown, time-of-day capture patterns, streaks). Computed from
   existing tables (`dump`, `todo`, `event`, `activity`); read-only.
+- **Background memory (claude-mem–style):** after chat/dump turns, a background
+  AI pass extracts durable facts/preferences into a `memory` table (with vector
+  embeddings); relevant memories are recalled into future chat context. The UI
+  hint is minimal — a subtle "saved to memory" cue, never a modal.
+- **Memory manager page:** CRUD over stored memories (view / add / edit / delete).
+- **Document RAG:** upload documents → object storage → chunk + embed → vector
+  search → retrieved context injected into the chat.
+- **Web search in chat:** a tool/MCP the chat can call for current information.
+- **Chat tools/functions:** create_todo, create_event, search_memory,
+  search_documents (RAG), web_search, read_calendar.
 
 ### Out (explicitly deferred — YAGNI)
 - Multi-user / sharing / auth beyond the single owner.
@@ -76,6 +86,18 @@ shows events, scheduled todos, and unscheduled "things to do" in one place.
   items / mis-tags). `deepseek-reasoner` is avoided for live extraction (weak
   tool-calling + latency); only a tool-calling-capable chat model is used for
   extraction.
+- **Object storage:** **`rustfs`** (S3-compatible, Rust) as a self-hosted compose
+  service for uploaded documents. Accessed via an S3 client. (Interpreting the
+  user's "rust-fs" as rustfs/S3-compatible storage.)
+- **Vector store:** **pgvector** extension on the same self-hosted Postgres
+  (compose image switches to `pgvector/pgvector:pg16`; `CREATE EXTENSION vector`).
+  Embeddings for both document chunks and memories live here — no separate vector DB.
+- **Embeddings:** **Ollama** compose service running a small embedding model
+  (default `nomic-embed-text`), called via the Vercel AI SDK Ollama provider —
+  fully self-hosted, nothing leaves the box. (Swappable to a hosted embeddings
+  provider via env if desired.)
+- **Web search:** self-hosted **SearXNG** compose service exposed to the chat as a
+  tool (optionally an MCP server); optional hosted fallback (Brave/Tavily) via env.
 - **Google:** `googleapis` for Calendar read/write per linked account.
 - **Package manager / test runner:** Bun (`bun install`, `bun test`).
 
@@ -160,6 +182,26 @@ syncs). Adaptive thinking enabled for this call.
 - Tradeoff accepted: DeepSeek's structured tool-calling/classification quality is
   generally below Claude, so expect more items in the "needs review" lane — the
   review/undo flow absorbs this. Flip the env to Claude if it gets noisy.
+
+### Chat tools / functions
+The chat AI is given a tool surface (configurable-provider tool-calling): `create_todo`,
+`create_event`, `search_memory`, `search_documents` (RAG), `web_search`,
+`read_calendar`. Tools are gated/validated the same way as extraction (auto-then-undo;
+invalid/low-confidence → activity feed).
+
+### Document RAG
+Upload → store the file in `rustfs` (S3) + a `document` row → chunk text → embed
+chunks (Ollama) → store vectors in pgvector (`document_chunk` with an embedding
+column) → at query time, embed the query, vector-search top-k chunks, inject as
+context. `search_documents` is the chat tool wrapping this.
+
+### Background memory (claude-mem–style)
+After a chat/dump turn, a background pass asks the model to extract durable,
+reusable facts (preferences, recurring context, people/projects) → `memory` rows
+(content + embedding + source + createdAt). Recall: embed the current context,
+vector-search relevant memories, inject the top few. Surfacing is deliberately
+quiet — a small "saved to memory" cue, no modal. The memory manager page is the
+explicit CRUD surface over `memory`.
 
 ## 7. UI / Visual Direction
 
