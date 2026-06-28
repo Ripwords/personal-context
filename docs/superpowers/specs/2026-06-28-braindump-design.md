@@ -36,6 +36,10 @@ shows events, scheduled todos, and unscheduled "things to do" in one place.
 - **Two Google accounts** (personal + work) via OAuth, two-way sync; read events
   from both, write AI events to a dedicated "Braindump" Google calendar.
 - **Activity feed + undo**.
+- **Analytics dashboard** — a simple usage-stats view (e.g. dumps/day, todos
+  created vs. completed, completion rate, scheduled vs. unscheduled ratio,
+  per-project breakdown, time-of-day capture patterns, streaks). Computed from
+  existing tables (`dump`, `todo`, `event`, `activity`); read-only.
 
 ### Out (explicitly deferred — YAGNI)
 - Multi-user / sharing / auth beyond the single owner.
@@ -47,10 +51,23 @@ shows events, scheduled todos, and unscheduled "things to do" in one place.
 ## 3. Stack
 
 - **Frontend/SSR:** Nuxt 4, Nuxt UI v4 (chat + UI components), Tailwind.
-- **Hosting:** Vercel (Nitro server routes for the API).
+- **Hosting:** **Fully self-hosted via Docker Compose** (no Vercel, no Neon) —
+  modeled on `~/Documents/ai-trader`: a `postgres:16-alpine` service (named
+  volume + healthcheck), a one-shot `drizzle-migrate` migrator service, and the
+  Nuxt app service (Nitro prod bundle) gated on
+  `drizzle-migrate: service_completed_successfully`. Multi-stage Dockerfile
+  (`deps → build → migrate → run`) using `oven/bun` images.
 - **Auth:** Better Auth (Google social provider + account linking for the 2nd
   Google account).
-- **DB:** Neon Postgres via Drizzle ORM.
+- **DB:** **Self-hosted Postgres** via Drizzle ORM using the
+  **`drizzle-orm/node-postgres`** driver (`pg.Pool`) — same connection path for
+  local and production (no Neon HTTP driver). Migrations applied by a
+  **programmatic migrator** (`drizzle-orm/node-postgres/migrator`), run as the
+  compose `drizzle-migrate` service (`drizzle-kit migrate` hangs in non-TTY).
+  Connection via `DATABASE_URL` (composed from `POSTGRES_USER/PASSWORD/DB` in
+  compose). **node-postgres supports interactive `db.transaction()`** — so the
+  Plan-1/Plan-2 carry-forward about neon-http lacking transactions is resolved;
+  AI multi-entity writes (Plan "AI extraction") use real transactions.
 - **AI:** Vercel AI SDK with a **configurable provider** (single config point in
   `ai/`). Default `deepseek-chat` (`@ai-sdk/deepseek`) for cost; swappable to
   Anthropic `claude-sonnet-4-6` / `claude-opus-4-8` per-task or globally via env.
@@ -146,22 +163,30 @@ syncs). Adaptive thinking enabled for this call.
 
 ## 7. UI / Visual Direction
 
-Derived from `/ui-ux-pro-max` (calm teal focus + warm background,
-micro-interactions, full light/dark), **adapted** away from the default
-spa/serif single-column output (wrong for a data-dense calendar):
+**Minimal, monochrome, low-chrome** — the owner is already managing chaos, so the
+interface must feel calm and quiet, not decorated. Black-and-white / grayscale
+base; near-zero ornament. (This supersedes the earlier warm-paper/teal direction.)
 
 - **App shell (three panes):** left project filter rail · center calendar (week
   default; day/month toggle) · right unscheduled-todo rail. A docked **dump
-  button** opens the chat as a slide-over.
-- **Palette:** warm paper background, calm ink foreground, teal app primary;
-  **each project carries its own accent** via Nuxt UI color tokens so the
-  calendar reads at a glance. Destructive red reserved for real deletes — no
-  ambient urgency.
-- **Type:** clean sans for dense UI (Inter/Geist); one characterful display face
-  for headers + the dump screen. (Not Lora body — too wellness-heavy for data.)
-- **Motion & a11y:** drag-to-schedule with spring motion; 150–300ms transitions;
-  skeleton loaders; `prefers-reduced-motion` respected; undo via toast;
+  button** opens the chat as a slide-over. Thin hairline dividers, generous
+  whitespace, no heavy cards/shadows/gradients.
+- **Palette:** grayscale — near-black ink (`#111`) on near-white (`#fafafa`) in
+  light, inverted in dark; borders/dividers in low-contrast gray. **At most one
+  restrained accent**, used sparingly (focus ring, primary action).
+- **Project distinction without color-coding:** since the palette is monochrome,
+  projects are distinguished primarily by a **text label/initial** and **tonal
+  layering** (grayscale shade + a thin left-border tick), not by hue. The `color`
+  token still exists on `project`, but the UI renders it as a single muted accent
+  tick at most — never the dominant signal. (If the owner later wants more color,
+  it's a one-token change.)
+- **Type:** one clean sans (e.g. Inter/Geist) at a tight, consistent scale;
+  weight (not color) carries hierarchy. Tabular figures for any stats/times.
+- **Motion & a11y:** subtle, fast (150–300ms), no flourish; drag-to-schedule with
+  minimal feedback; `prefers-reduced-motion` respected; undo via toast;
   focus-visible rings; contrast ≥ 4.5:1; responsive at 375 / 768 / 1024 / 1440.
+- **Analytics dashboard** follows the same minimal language: small multiples /
+  sparkline-style charts, grayscale, labels over legends, lots of whitespace.
 
 ## 8. Google OAuth Setup (two accounts)
 
