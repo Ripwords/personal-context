@@ -42,6 +42,25 @@ is expanded to full bite-sized TDD detail when we reach it.
   stats from `dump`/`todo`/`event`/`activity` (dumps/day, created vs completed,
   completion rate, scheduled vs unscheduled, per-project breakdown, capture
   time-of-day, streaks), rendered in the minimal monochrome language.
+- **Plan C — Document RAG + object storage** (after Plan A): add `rustfs` (S3) +
+  switch Postgres image to `pgvector/pgvector:pg16` + `CREATE EXTENSION vector` +
+  `Ollama` (embeddings) compose services; `document`/`document_chunk` tables;
+  upload API → store → chunk → embed → vector search; `search_documents` chat tool.
+- **Plan D — Background memory + memory manager** (after Plan C; reuses pgvector +
+  Ollama): `memory` table (content + embedding + source); background extraction
+  pass after chat/dump turns; semantic recall into chat context; minimal "saved"
+  cue; memory-manager CRUD page.
+- **Plan E — Chat tools & web search** (folds into the AI chat plan): tool surface
+  (`create_todo`/`create_event`/`search_memory`/`search_documents`/`web_search`/
+  `read_calendar`); self-hosted **SearXNG** compose service + `web_search` tool
+  (optional MCP wrapper; hosted Brave/Tavily fallback via env).
+
+### Revised sequencing (high level)
+A (self-host DB/app/compose) → 2-Task6 live OAuth (when creds) → 3 (calendar read+UI)
+→ AI chat + extraction + **E (tools/web search)** → 5 (project tagging) → 6 (drag/write-back)
+→ **C (doc RAG)** → **D (background memory + manager)** → 7 (end-of-day) → **B (analytics)** → 8 (polish).
+Each new compose service (rustfs, pgvector image, ollama, searxng) is added in the
+plan that first needs it, not upfront.
 
 ## Outline detail for Plans 2–8
 
