@@ -172,6 +172,21 @@ export const verification = pgTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
+// ── Google connection tables ───────────────────────────────────────────────
+
+export const connectionRole = pgEnum("connection_role", ["personal", "work"]);
+
+export const googleConnections = pgTable("google_connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountId: text("account_id").notNull().unique(), // FK to account.id added in migration
+  role: connectionRole("role").notNull(),
+  braindumpCalendarId: text("braindump_calendar_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type GoogleConnection = typeof googleConnections.$inferSelect;
+export type NewGoogleConnection = typeof googleConnections.$inferInsert;
+
 // ── Better Auth relations ──────────────────────────────────────────────────
 
 export const userRelations = relations(user, ({ many }) => ({
