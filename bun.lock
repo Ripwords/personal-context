@@ -9,6 +9,7 @@
         "@nuxt/ui": "^4.9.0",
         "drizzle-orm": "^0.45.2",
         "nuxt": "^4.4.8",
+        "postgres": "^3.4.9",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -1309,6 +1310,8 @@
     "postcss-unique-selectors": ["postcss-unique-selectors@8.0.1", "", { "dependencies": { "postcss-selector-parser": "^7.1.2" }, "peerDependencies": { "postcss": "^8.5.15" } }, "sha512-+xvKI5+/Cl8yYQwxDV39Uhuc4WV951xngFvPPjiPj2NIbIfm6vbbRTXblyw0FioLkIoGlw+7qUcY1h2YhaZYgw=="],
 
     "postcss-value-parser": ["postcss-value-parser@4.2.0", "", {}, "sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ=="],
+
+    "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
 
     "powershell-utils": ["powershell-utils@0.1.0", "", {}, "sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A=="],
 
