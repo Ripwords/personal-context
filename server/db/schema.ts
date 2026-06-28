@@ -119,6 +119,7 @@ export const session = pgTable(
     token: text("token").notNull().unique(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
+      .defaultNow()
       .$onUpdate(() => new Date())
       .notNull(),
     ipAddress: text("ip_address"),
@@ -148,6 +149,7 @@ export const account = pgTable(
     password: text("password"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
+      .defaultNow()
       .$onUpdate(() => new Date())
       .notNull(),
   },
