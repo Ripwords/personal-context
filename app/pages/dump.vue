@@ -14,6 +14,7 @@ interface CreatedItem {
 interface DumpResult {
   dumpId: string;
   created: CreatedItem[];
+  memoriesSaved: number;
 }
 
 const toast = useToast();
@@ -22,6 +23,8 @@ const text = ref<string>("");
 const loading = ref<boolean>(false);
 const lastCreated = ref<CreatedItem[]>([]);
 const activityFeed = ref<InstanceType<typeof ActivityFeed> | null>(null);
+const memoryCue = ref<string>("");
+let memoryCueTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function capture(): Promise<void> {
   if (!text.value.trim()) return;
@@ -39,6 +42,11 @@ async function capture(): Promise<void> {
     text.value = "";
     toast.add({ title: "Captured", color: "neutral" });
     await activityFeed.value?.refresh();
+    if (result.memoriesSaved > 0) {
+      if (memoryCueTimer) clearTimeout(memoryCueTimer);
+      memoryCue.value = `🧠 ${result.memoriesSaved} saved to memory`;
+      memoryCueTimer = setTimeout(() => { memoryCue.value = ""; }, 3500);
+    }
   } catch (err: unknown) {
     const statusCode = (err as { statusCode?: number })?.statusCode;
     if (statusCode === 502) {
@@ -87,7 +95,21 @@ async function capture(): Promise<void> {
           @keydown.meta.enter="capture"
           @keydown.ctrl.enter="capture"
         />
-        <div class="flex justify-end">
+        <div class="flex items-center justify-end gap-3">
+          <Transition
+            enter-active-class="motion-safe:transition-opacity motion-safe:duration-300"
+            leave-active-class="motion-safe:transition-opacity motion-safe:duration-700"
+            enter-from-class="opacity-0"
+            leave-to-class="opacity-0"
+          >
+            <p
+              v-if="memoryCue"
+              aria-live="polite"
+              class="text-xs text-neutral-400"
+            >
+              {{ memoryCue }}
+            </p>
+          </Transition>
           <button
             type="button"
             :disabled="loading || !text.trim()"
