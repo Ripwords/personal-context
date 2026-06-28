@@ -277,22 +277,24 @@ export async function syncConnectionEvents(
     .filter((r): r is NewEventRow => r !== null);
   if (rows.length === 0) return 0;
 
-  await db.batch(
-    rows.map((row) =>
-      db
+  // node-postgres supports interactive transactions — wrap the upserts so a
+  // sync either fully lands or rolls back.
+  await db.transaction(async (tx) => {
+    for (const row of rows) {
+      await tx
         .insert(events)
         .values(row)
         .onConflictDoUpdate({
           target: [events.googleAccountId, events.googleEventId],
           set: { title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, syncStatus: "synced" },
-        }),
-    ) as unknown as Parameters<typeof db.batch>[0],
-  );
+        });
+    }
+  });
   return rows.length;
 }
 ```
 
-> The `db.batch(...)` array typing across the `neon-http | postgres-js` union can be awkward; if the `as unknown as` cast is needed to satisfy the union, keep it minimal and comment it. If `db.batch` is unavailable on the local `postgres-js` driver in your version, fall back to a sequential `for (const row of rows) await db.insert(...).onConflictDoUpdate(...)` loop (single-row writes are safe without a transaction) and note it.
+> Uses `db.transaction()` (available on `drizzle-orm/node-postgres`). No `any`, no casts. The composite-unique upsert target `(googleAccountId, googleEventId)` requires the unique index from Step 1.
 
 - [ ] **Step 5: Run test to verify it passes**
 
