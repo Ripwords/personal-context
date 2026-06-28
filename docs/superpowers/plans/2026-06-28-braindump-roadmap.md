@@ -8,7 +8,7 @@ is expanded to full bite-sized TDD detail when we reach it.
 |---|------|------------------------|--------|
 | 1 | **Foundation & Data Layer** | Nuxt 4 + Bun scaffold, env validation, Drizzle schema + migrations, seeded projects, fully-tested query helpers | **Written** → `2026-06-28-plan-1-foundation.md` |
 | 2 | Auth & Two Google Accounts | Better Auth login, link 2nd Google account, store per-account tokens, create dedicated "Braindump" Google calendar | **Written** → `2026-06-28-plan-2-auth-google.md` |
-| 3 | Calendar Read & UI Shell | Read events from both accounts → three-pane app shell, week/day/month views, project color-coding, unscheduled rail | Outlined |
+| 3 | Calendar Read & UI Shell | Read events from both accounts → three-pane app shell, week/day/month views, project color-coding, unscheduled rail | **Phase 1 (read backend) written** → `2026-06-28-plan-3-calendar-read.md`; Phase 2 (UI) outlined |
 | 4 | AI Live Extraction | Dump chat → configurable provider (DeepSeek default) tool-calls → todos/events, activity feed + undo | Outlined |
 | 5 | Smart Project Tagging | Keyword-biased classifier, confidence flagging, one-tap correction UI | Outlined |
 | 6 | Drag-to-Schedule & Write-back | Drag unscheduled todos onto timeline, two-way Google sync, conflict handling | Outlined |
