@@ -1,18 +1,12 @@
 // server/db/client.ts
-import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
-import { drizzle as drizzlePg } from "drizzle-orm/postgres-js";
-import { neon } from "@neondatabase/serverless";
-import postgres from "postgres";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import * as schema from "./schema";
 
-export function makeDb(url: string) {
-  const host = new URL(url).hostname;
-  if (host === "localhost" || host === "127.0.0.1") {
-    const client = postgres(url);
-    return drizzlePg(client, { schema });
-  }
-  const sql = neon(url);
-  return drizzleNeon(sql, { schema });
+export function makeDb(url: string): NodePgDatabase<typeof schema> {
+  // allowExitOnIdle lets `bun test` exit without hanging on idle pool sockets.
+  const pool = new Pool({ connectionString: url, allowExitOnIdle: true });
+  return drizzle(pool, { schema });
 }
 
 export type Db = ReturnType<typeof makeDb>;

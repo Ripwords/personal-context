@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const schema = z.object({
-  NUXT_DATABASE_URL: z.string().min(1, "NUXT_DATABASE_URL is required"),
+  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 });
 
 export function parseEnv(source: Record<string, string | undefined>): {
@@ -17,5 +17,5 @@ export function parseEnv(source: Record<string, string | undefined>): {
     }).join("; ");
     throw new Error(`Invalid environment: ${issues}`);
   }
-  return { databaseUrl: parsed.data.NUXT_DATABASE_URL };
+  return { databaseUrl: parsed.data.DATABASE_URL };
 }
