@@ -21,9 +21,97 @@ export type ExtractResult = {
   }>;
 };
 
+export type CreatedItem = ExtractResult["created"][number];
+
 type ToolCall =
   | { toolName: "create_todo"; input: TodoToolInput }
   | { toolName: "create_event"; input: EventToolInput };
+
+// ── Shared single-item create helpers (used by both dump and chat flows) ───
+
+/**
+ * Create a single todo from tool input. Resolves project name → id, inserts
+ * the todo row and logs an activity. The optional `dumpId` links the todo back
+ * to a brain-dump; pass `null` for the chat flow.
+ */
+export async function createTodoFromInput(
+  db: Db,
+  inp: TodoToolInput,
+  projects: ReadonlyArray<Project>,
+  dumpId: string | null = null,
+): Promise<CreatedItem> {
+  const projectId = resolveProject(inp.project, projects);
+  const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
+
+  const todo = await createTodo(db, {
+    title: inp.title,
+    notes: inp.notes ?? null,
+    projectId,
+    source: "ai",
+    confidence: inp.confidence ?? null,
+    dumpId: dumpId ?? undefined,
+  });
+
+  await logActivity(db, {
+    action: "create",
+    entityType: "todo",
+    entityId: todo.id,
+    payload: { title: todo.title, projectId, confidence: inp.confidence ?? null },
+  });
+
+  return {
+    kind: "todo",
+    id: todo.id,
+    title: todo.title,
+    projectId,
+    confidence: inp.confidence ?? null,
+    lowConfidence,
+  };
+}
+
+/**
+ * Create a single event from tool input. Returns `null` and skips the insert
+ * if either date is invalid (mirrors the dump-flow behaviour in applyToolCalls).
+ */
+export async function createEventFromInput(
+  db: Db,
+  inp: EventToolInput,
+  projects: ReadonlyArray<Project>,
+  dumpId: string | null = null,
+): Promise<CreatedItem | null> {
+  const startsAt = new Date(inp.startsAt);
+  const endsAt = new Date(inp.endsAt);
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+    return null;
+  }
+
+  const projectId = resolveProject(inp.project, projects);
+  const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
+
+  const event = await createEvent(db, {
+    title: inp.title,
+    startsAt,
+    endsAt,
+    projectId,
+    dumpId: dumpId ?? undefined,
+  });
+
+  await logActivity(db, {
+    action: "create",
+    entityType: "event",
+    entityId: event.id,
+    payload: { title: event.title, projectId, confidence: inp.confidence ?? null },
+  });
+
+  return {
+    kind: "event",
+    id: event.id,
+    title: event.title,
+    projectId,
+    confidence: inp.confidence ?? null,
+    lowConfidence,
+  };
+}
 
 // ── Pure mapper ────────────────────────────────────────────────────────────
 
@@ -45,66 +133,14 @@ export async function applyToolCalls(
     for (const call of calls) {
       if (call.toolName === "create_todo") {
         const inp = call.input as TodoToolInput;
-        const projectId = resolveProject(inp.project, projects);
-        const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
-
-        const todo = await createTodo(tx as Db, {
-          title: inp.title,
-          notes: inp.notes ?? null,
-          projectId,
-          source: "ai",
-          confidence: inp.confidence ?? null,
-          dumpId,
-        });
-
-        await logActivity(tx as Db, {
-          action: "create",
-          entityType: "todo",
-          entityId: todo.id,
-          payload: { title: todo.title, projectId, confidence: inp.confidence ?? null },
-        });
-
-        created.push({
-          kind: "todo",
-          id: todo.id,
-          title: todo.title,
-          projectId,
-          confidence: inp.confidence ?? null,
-          lowConfidence,
-        });
+        const item = await createTodoFromInput(tx as Db, inp, projects, dumpId);
+        created.push(item);
       } else if (call.toolName === "create_event") {
         const inp = call.input as EventToolInput;
-        const startsAt = new Date(inp.startsAt);
-        const endsAt = new Date(inp.endsAt);
-        if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
-          continue;
+        const item = await createEventFromInput(tx as Db, inp, projects, dumpId);
+        if (item !== null) {
+          created.push(item);
         }
-        const projectId = resolveProject(inp.project, projects);
-        const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
-
-        const event = await createEvent(tx as Db, {
-          title: inp.title,
-          startsAt,
-          endsAt,
-          projectId,
-          dumpId,
-        });
-
-        await logActivity(tx as Db, {
-          action: "create",
-          entityType: "event",
-          entityId: event.id,
-          payload: { title: event.title, projectId, confidence: inp.confidence ?? null },
-        });
-
-        created.push({
-          kind: "event",
-          id: event.id,
-          title: event.title,
-          projectId,
-          confidence: inp.confidence ?? null,
-          lowConfidence,
-        });
       }
     }
 
