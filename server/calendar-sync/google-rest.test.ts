@@ -25,3 +25,20 @@ test("events api lists and returns raw items array", async () => {
   expect(items.length).toBe(1);
   expect(items[0]!.id).toBe("g1");
 });
+
+test("token refresher throws on non-ok response", async () => {
+  const fakeFetch = (async (_url: string, _init?: RequestInit) => {
+    return new Response("", { status: 400 });
+  }) as unknown as typeof fetch;
+  const refresh = makeGoogleTokenRefresher("cid", "secret", fakeFetch);
+  await expect(refresh("rt")).rejects.toThrow();
+});
+
+test("events api returns [] when response JSON has no items", async () => {
+  const fakeFetch = (async (_url: string, _init?: RequestInit) => {
+    return new Response(JSON.stringify({}), { status: 200 });
+  }) as unknown as typeof fetch;
+  const api = makeGoogleEventsApi(fakeFetch);
+  const items = await api.list({ accessToken: "at_x", calendarId: "primary", timeMin: "2026-07-01T00:00:00Z", timeMax: "2026-07-02T00:00:00Z" });
+  expect(items).toEqual([]);
+});

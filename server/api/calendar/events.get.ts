@@ -1,7 +1,6 @@
 import { defineEventHandler, getQuery, createError } from "h3";
-import { makeDb } from "../../db/client";
-import { parseEnv } from "../../utils/env";
-import { getSession } from "../../utils/session";
+import { getDb } from "../../db/client";
+import { getAuthSession } from "../../utils/session";
 import { getGoogleConnections } from "../../auth/google-credentials";
 import { getFreshAccessToken } from "../../calendar-sync/access-token";
 import { syncConnectionEvents } from "../../calendar-sync/sync-events";
@@ -9,7 +8,7 @@ import { makeGoogleTokenRefresher, makeGoogleEventsApi } from "../../calendar-sy
 import { getCalendarFeed } from "../../db/queries/calendar-feed";
 
 export default defineEventHandler(async (event) => {
-  const session = await getSession(event);
+  const session = await getAuthSession(event);
   if (!session) throw createError({ statusCode: 401, statusMessage: "not authenticated" });
 
   const q = getQuery(event);
@@ -19,7 +18,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "invalid from/to" });
   }
 
-  const db = makeDb(parseEnv(process.env).databaseUrl);
+  const db = getDb();
   const refresh = makeGoogleTokenRefresher(
     process.env.GOOGLE_CLIENT_ID ?? "",
     process.env.GOOGLE_CLIENT_SECRET ?? "",
