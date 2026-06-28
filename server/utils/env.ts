@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const schema = z.object({
   NUXT_DATABASE_URL: z.string().min(1, "NUXT_DATABASE_URL is required"),
-}).strict();
+});
 
 export function parseEnv(source: Record<string, string | undefined>): {
   databaseUrl: string;
