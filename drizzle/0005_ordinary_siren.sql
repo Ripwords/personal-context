@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "events_google_identity" ON "events" USING btree ("google_account_id","google_event_id");
