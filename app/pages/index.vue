@@ -214,6 +214,15 @@ const weekLabel = computed(() => {
         >
           Documents
         </NuxtLink>
+        <NuxtLink
+          to="/chat"
+          class="px-3 py-1 text-xs font-medium rounded border border-neutral-200 bg-white
+                 text-neutral-600 hover:bg-neutral-50
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+                 motion-safe:transition-colors"
+        >
+          Chat
+        </NuxtLink>
       </div>
 
       <!-- View toggle -->
