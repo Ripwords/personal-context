@@ -29,6 +29,7 @@ export const eventSyncStatus = pgEnum("event_sync_status", [
   "error",
 ]);
 export const itemSource = pgEnum("item_source", ["ai", "manual"]);
+export const memorySource = pgEnum("memory_source", ["dump", "chat", "manual"]);
 
 // ── App tables ─────────────────────────────────────────────────────────────
 
@@ -77,6 +78,13 @@ export const events = pgTable("events", {
   googleIdentity: uniqueIndex("events_google_identity").on(t.googleAccountId, t.googleEventId),
 }));
 
+export const memory = pgTable("memory", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  content: text("content").notNull(),
+  source: memorySource("source").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const activities = pgTable("activities", {
   id: uuid("id").primaryKey().defaultRandom(),
   action: text("action").notNull(),
@@ -98,6 +106,8 @@ export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
 export type Activity = typeof activities.$inferSelect;
 export type NewActivity = typeof activities.$inferInsert;
+export type Memory = typeof memory.$inferSelect;
+export type NewMemory = typeof memory.$inferInsert;
 
 // ── Better Auth tables ─────────────────────────────────────────────────────
 

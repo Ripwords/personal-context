@@ -12,6 +12,6 @@ export function getTestDb(): Db {
 
 export async function truncateAll(db: Db): Promise<void> {
   await db.execute(
-    sql`TRUNCATE TABLE google_connections, activities, events, todos, dumps, projects, account, session, verification, "user" RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE memory, google_connections, activities, events, todos, dumps, projects, account, session, verification, "user" RESTART IDENTITY CASCADE`,
   );
 }
