@@ -20,7 +20,9 @@ const {
   data: rows,
   refresh,
   status,
-} = await useFetch<ActivityRow[]>("/api/activity");
+} = useFetch<ActivityRow[]>("/api/activity");
+
+defineExpose({ refresh });
 
 const undoing = ref<boolean>(false);
 

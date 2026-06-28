@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import type ActivityFeed from "~/components/ActivityFeed.vue";
 
 interface CreatedItem {
   kind: "todo" | "event";
@@ -20,6 +21,7 @@ const toast = useToast();
 const text = ref<string>("");
 const loading = ref<boolean>(false);
 const lastCreated = ref<CreatedItem[]>([]);
+const activityFeed = ref<InstanceType<typeof ActivityFeed> | null>(null);
 
 async function capture(): Promise<void> {
   if (!text.value.trim()) return;
@@ -36,6 +38,7 @@ async function capture(): Promise<void> {
     lastCreated.value = result.created;
     text.value = "";
     toast.add({ title: "Captured", color: "neutral" });
+    await activityFeed.value?.refresh();
   } catch (err: unknown) {
     const statusCode = (err as { statusCode?: number })?.statusCode;
     if (statusCode === 502) {
@@ -72,16 +75,15 @@ async function capture(): Promise<void> {
         <label for="dump-textarea" class="text-xs font-semibold tracking-widest uppercase text-neutral-400">
           What's on your mind?
         </label>
-        <textarea
+        <UTextarea
           id="dump-textarea"
           v-model="text"
-          rows="10"
+          :rows="10"
           placeholder="Dump everything here — todos, events, ideas…"
           :disabled="loading"
-          class="w-full resize-none rounded border border-neutral-200 bg-white px-4 py-3
-                 text-sm text-neutral-900 placeholder-neutral-400
-                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
-                 disabled:opacity-50 disabled:cursor-not-allowed"
+          :ui="{
+            base: 'w-full resize-none rounded border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-900 placeholder-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 disabled:opacity-50 disabled:cursor-not-allowed',
+          }"
           @keydown.meta.enter="capture"
           @keydown.ctrl.enter="capture"
         />
@@ -138,6 +140,11 @@ async function capture(): Promise<void> {
           </li>
         </ul>
       </section>
+
+      <!-- Recent activity -->
+      <div class="w-full border border-neutral-200 rounded bg-white px-6 py-5">
+        <ActivityFeed ref="activityFeed" />
+      </div>
     </main>
   </div>
 </template>
