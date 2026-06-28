@@ -51,9 +51,14 @@ shows events, scheduled todos, and unscheduled "things to do" in one place.
 - **Auth:** Better Auth (Google social provider + account linking for the 2nd
   Google account).
 - **DB:** Neon Postgres via Drizzle ORM.
-- **AI:** Vercel AI SDK + Anthropic provider. Model `claude-sonnet-4-6` (default),
-  overridable to `claude-opus-4-8`. Adaptive thinking on for end-of-day summary,
-  off for fast live extraction.
+- **AI:** Vercel AI SDK with a **configurable provider** (single config point in
+  `ai/`). Default `deepseek-chat` (`@ai-sdk/deepseek`) for cost; swappable to
+  Anthropic `claude-sonnet-4-6` / `claude-opus-4-8` per-task or globally via env.
+  Live extraction is high-volume and cost-sensitive; the model is the one knob to
+  turn if extraction/classification quality disappoints (more "needs review"
+  items / mis-tags). `deepseek-reasoner` is avoided for live extraction (weak
+  tool-calling + latency); only a tool-calling-capable chat model is used for
+  extraction.
 - **Google:** `googleapis` for Calendar read/write per linked account.
 - **Package manager / test runner:** Bun (`bun install`, `bun test`).
 
@@ -128,10 +133,16 @@ The user approves blocks into the calendar (approval applies the schedule and
 syncs). Adaptive thinking enabled for this call.
 
 ### Model & provider
-- `claude-sonnet-4-6` default (cost/quality balance for frequent extraction);
-  `claude-opus-4-8` override available.
-- Called through the Vercel AI SDK Anthropic provider so Nuxt UI chat components
-  bind directly.
+- **Configurable provider**, one config point in `ai/`. Default `deepseek-chat`
+  (cheapest for high-volume live extraction); env-swappable to Anthropic
+  `claude-sonnet-4-6` / `claude-opus-4-8` per-task or globally.
+- Extraction requires a tool-calling-capable chat model (so `deepseek-reasoner`
+  is excluded from the extraction path).
+- Called through the Vercel AI SDK so Nuxt UI chat components bind directly
+  regardless of provider.
+- Tradeoff accepted: DeepSeek's structured tool-calling/classification quality is
+  generally below Claude, so expect more items in the "needs review" lane — the
+  review/undo flow absorbs this. Flip the env to Claude if it gets noisy.
 
 ## 7. UI / Visual Direction
 
