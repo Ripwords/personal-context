@@ -114,6 +114,8 @@ function onSearchInput(): void {
       searchResults.value = await $fetch<DocumentSearchResult[]>(
         `/api/documents/search?q=${encodeURIComponent(q)}`,
       );
+    } catch {
+      searchResults.value = [];
     } finally {
       searching.value = false;
     }
@@ -221,10 +223,6 @@ function excerpt(content: string, maxLen = 200): string {
           <div
             v-else-if="searchResults !== null"
           >
-            <p class="text-[11px] text-neutral-400 mb-2 tabular-nums">
-              {{ searchResults.length }} result{{ searchResults.length === 1 ? "" : "s" }}
-            </p>
-
             <div
               v-if="searchResults.length === 0"
               class="py-8 text-center text-sm text-neutral-400"
@@ -232,10 +230,14 @@ function excerpt(content: string, maxLen = 200): string {
               No matching content found.
             </div>
 
-            <ul
-              v-else
-              class="divide-y divide-neutral-200 border border-neutral-200 rounded bg-white"
-            >
+            <template v-else>
+              <p class="text-[11px] text-neutral-400 mb-2 tabular-nums">
+                {{ searchResults.length }} result{{ searchResults.length === 1 ? "" : "s" }}
+              </p>
+
+              <ul
+                class="divide-y divide-neutral-200 border border-neutral-200 rounded bg-white"
+              >
               <li
                 v-for="(r, i) in searchResults"
                 :key="`${r.documentId}-${r.chunkIndex}-${i}`"
@@ -248,7 +250,8 @@ function excerpt(content: string, maxLen = 200): string {
                   {{ excerpt(r.content) }}
                 </p>
               </li>
-            </ul>
+              </ul>
+            </template>
           </div>
         </div>
       </section>

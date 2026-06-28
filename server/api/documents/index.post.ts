@@ -1,6 +1,6 @@
 import { defineEventHandler, createError, readMultipartFormData } from "h3";
 import { mkdir, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { getDb } from "../../db/client";
 import { getAuthSession } from "../../utils/session";
 import { createDocumentWithChunks } from "../../db/queries/documents";
@@ -8,7 +8,7 @@ import { extractText } from "../../rag/extract-text";
 import { chunkText } from "../../rag/chunk";
 
 const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-const UPLOADS_DIR = "./uploads";
+const UPLOADS_DIR = resolve("./uploads");
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -49,7 +49,7 @@ export default defineEventHandler(async (event) => {
   // Write to ./uploads/<uuid>-<safeName>
   await mkdir(UPLOADS_DIR, { recursive: true });
   const storageFilename = `${crypto.randomUUID()}-${safeName}`;
-  const storagePath = join(UPLOADS_DIR, storageFilename);
+  const storagePath = resolve(UPLOADS_DIR, storageFilename);
 
   await Bun.write(storagePath, bytes);
 
