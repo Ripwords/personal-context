@@ -205,6 +205,15 @@ const weekLabel = computed(() => {
         >
           Memory
         </NuxtLink>
+        <NuxtLink
+          to="/documents"
+          class="px-3 py-1 text-xs font-medium rounded border border-neutral-200 bg-white
+                 text-neutral-600 hover:bg-neutral-50
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+                 motion-safe:transition-colors"
+        >
+          Documents
+        </NuxtLink>
       </div>
 
       <!-- View toggle -->
