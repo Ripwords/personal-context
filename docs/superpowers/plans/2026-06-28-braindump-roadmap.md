@@ -16,13 +16,32 @@ is expanded to full bite-sized TDD detail when we reach it.
 | 8 | Visual Polish & A11y | UI-direction pass, motion, reduced-motion, contrast/focus checklist, responsive | Outlined |
 
 ## Decisions carried from the spec (locked)
-- Single user; hosted on Vercel.
-- Stack: Nuxt 4, Nuxt UI v4, Tailwind, Better Auth, Neon Postgres, Drizzle, Vercel AI SDK.
+- Single user. **Fully self-hosted via Docker Compose** (no Vercel) — postgres +
+  one-shot drizzle-migrate + Nuxt app, modeled on `~/Documents/ai-trader`.
+- Stack: Nuxt 4, Nuxt UI v4, Tailwind, Better Auth, **self-hosted Postgres via
+  `drizzle-orm/node-postgres` (pg Pool)** + programmatic migrator, Drizzle, Vercel AI SDK.
+  *(Neon dropped. node-postgres gives real `db.transaction()` — resolves the
+  Plan-1/2 transaction carry-forward.)*
 - AI provider **configurable, `deepseek-chat` default**; extraction uses a tool-calling-capable chat model only.
 - Default projects: **Work, Part-time, Freelance, Hackathon, Personal**.
 - Calendar default view: **week**. AI events auto-write to a dedicated **"Braindump"** Google calendar.
+- **UI: minimal, monochrome (black & white), low-chrome.** Projects distinguished
+  by label + tonal layering, not hue (at most one restrained accent).
 - "Auto then undo" everywhere: nothing irreversible; activity feed + undo.
-- TDD; Bun as package manager + test runner.
+- TDD; Bun as package manager + test runner; `oven/bun` Docker images.
+
+## New plans added (2026-06-28, from user direction)
+- **Plan A — Self-hosting & DB migration** (do BEFORE Plan 4/AI, since it changes
+  the DB client every later task uses): refactor `server/db/client.ts` from
+  postgres-js/neon-http to a single `drizzle-orm/node-postgres` Pool; standardize
+  env to `DATABASE_URL`; add the programmatic migrator (`server/db/migrate.ts`);
+  multi-stage `oven/bun` Dockerfile (`deps→build→migrate→run`); `docker-compose.yml`
+  (postgres + drizzle-migrate + app) + `.env.example`. Update test harness to the
+  new client. *Resolves the transaction carry-forward.*
+- **Plan B — Analytics Dashboard** (late, after data accrues): read-only usage
+  stats from `dump`/`todo`/`event`/`activity` (dumps/day, created vs completed,
+  completion rate, scheduled vs unscheduled, per-project breakdown, capture
+  time-of-day, streaks), rendered in the minimal monochrome language.
 
 ## Outline detail for Plans 2–8
 
