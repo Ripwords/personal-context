@@ -12,6 +12,11 @@ export function makeDb(url: string): NodePgDatabase<typeof schema> {
 
 export type Db = ReturnType<typeof makeDb>;
 
+/** Union of the top-level Db and a drizzle transaction object — lets query
+ *  helpers be called both at the top level and inside db.transaction() without
+ *  a `tx as Db` cast. */
+export type DbOrTx = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 let _db: Db | undefined;
 export function getDb(): Db {
   if (!_db) _db = makeDb(parseEnv(process.env).databaseUrl);

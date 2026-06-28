@@ -157,12 +157,12 @@ export async function applyWindDownSchedule(
         continue;
       }
 
-      await (tx as Db)
+      await tx
         .update(todos)
         .set({ scheduledStart: startsAt, scheduledEnd: endsAt })
         .where(eq(todos.id, block.todoId));
 
-      await logActivity(tx as Db, {
+      await logActivity(tx, {
         action: "schedule",
         entityType: "todo",
         entityId: block.todoId,
