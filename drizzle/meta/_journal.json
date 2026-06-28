@@ -8,6 +8,34 @@
       "when": 1782652042594,
       "tag": "0000_pale_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782656276581,
+      "tag": "0001_common_scarlet_witch",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782656566266,
+      "tag": "0002_gifted_human_torch",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782656876551,
+      "tag": "0003_legal_the_hand",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782657171403,
+      "tag": "0004_gray_may_parker",
+      "breakpoints": true
     }
   ]
 }

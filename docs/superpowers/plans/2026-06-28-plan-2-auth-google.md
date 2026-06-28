@@ -135,6 +135,17 @@ export const auth = betterAuth({
 });
 ```
 
+- [ ] **Step 5b: Add placeholder auth env vars to `.env`** (so construction + schema-gen work without real Google creds)
+
+Append to `.env` (gitignored) if absent:
+```bash
+BETTER_AUTH_SECRET="dev-placeholder-secret-change-me"
+BETTER_AUTH_URL="http://localhost:3000"
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+```
+(Real Google values arrive in the Prerequisites; empty strings are fine for Tasks 1–5.)
+
 - [ ] **Step 6: Generate and commit the auth schema**
 
 Run Better Auth's schema generator (verified name from Step 2, e.g. `bunx @better-auth/cli generate`) so the `user`/`session`/`account`/`verification` tables are added to `server/db/schema.ts` (or the file it targets — reconcile so all Drizzle tables live in `server/db/schema.ts`).
@@ -144,15 +155,20 @@ Then generate the Drizzle migration:
 Run: `bun run db:generate`
 Expected: a new `drizzle/000X_*.sql` adding the four auth tables.
 
-- [ ] **Step 7: Add `db:migrate` script and apply migrations**
+- [ ] **Step 7: Add `db:migrate` script and apply migrations from a clean baseline**
 
 Add to `package.json` scripts:
 ```json
 "db:migrate": "drizzle-kit migrate"
 ```
-Apply to the local DB:
-Run: `bun run db:migrate`
-Expected: migrations applied; `account` table now exists.
+
+⚠️ Plan 1's `0000` migration was applied to the local DB via `psql` with **no drizzle journal**, so `drizzle-kit migrate` would try to re-create existing tables and fail. The local test DB is **disposable** — reset its schema and migrate from scratch so the journal is correct:
+
+```bash
+docker exec braindump-test-pg psql -U postgres -d braindump_test -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+bun run db:migrate
+```
+Expected: both `0000` (Plan 1 tables) and the new auth migration apply cleanly; `account` table now exists; a `__drizzle_migrations` journal table is present.
 
 - [ ] **Step 8: Run the test to verify it passes**
 
@@ -202,6 +218,7 @@ Expected: FAIL — cannot find module `./[...all]`.
 
 ```ts
 // server/api/auth/[...all].ts
+import { defineEventHandler, toWebRequest } from "h3";
 import { auth } from "../../auth";
 
 export default defineEventHandler((event) => {
@@ -209,7 +226,7 @@ export default defineEventHandler((event) => {
 });
 ```
 
-(`defineEventHandler` and `toWebRequest` are Nitro/h3 auto-imports. If Better Auth ships a Nuxt/h3 helper, prefer it and note the change.)
+Import `defineEventHandler`/`toWebRequest` **explicitly from `h3`** (not the Nitro auto-import) so the file is importable under plain `bun test` (no Nuxt runtime in tests). `h3` is already present via Nuxt. If Better Auth ships a Nuxt/h3 helper, prefer it and note the change. Confirm the handler property name matches what Task 1 verified.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -305,6 +322,19 @@ export type NewGoogleConnection = typeof googleConnections.$inferInsert;
 
 Run: `bun run db:generate && bun run db:migrate`
 Expected: `google_connections` table + `connection_role` enum created.
+
+- [ ] **Step 4b: Extend `truncateAll` to clear the auth + connection tables**
+
+`truncateAll` (Plan 1) only clears the five domain tables, but these tests seed `account` rows in `beforeEach`. Update `server/db/test-helpers.ts` so isolation also clears the new tables (CASCADE handles FK order; `user` is a reserved word — quote it):
+
+```ts
+export async function truncateAll(db: Db): Promise<void> {
+  await db.execute(
+    sql`TRUNCATE TABLE google_connections, activities, events, todos, dumps, projects, account, session, verification, "user" RESTART IDENTITY CASCADE`,
+  );
+}
+```
+(Use the exact Better Auth table names generated in Task 1 — adjust if generation pluralized or renamed them.) Re-run the full Plan 1 suite once after this change to confirm nothing regressed: `bun test` → still green.
 
 - [ ] **Step 5: Write the helpers**
 
