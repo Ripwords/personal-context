@@ -41,8 +41,10 @@ export default defineEventHandler(async (event) => {
 
   // Mirror AI-created events + scheduled todos to the user's dedicated "Braindump"
   // Google calendar so they appear in Google/other clients. Best-effort: never
-  // fail the dump if Google is unreachable.
+  // fail the dump if Google is unreachable. `needsReauth` lets the UI prompt a
+  // re-sign-in when the calendar scope is missing.
   let writtenToGoogle = 0;
+  let needsReauth = false;
   try {
     const db = getDb();
     const items = await resolveWritebackItems(db, extractResult.created);
@@ -56,7 +58,7 @@ export default defineEventHandler(async (event) => {
           process.env.GOOGLE_CLIENT_SECRET ?? "",
         );
         const accessToken = await getFreshAccessToken(target, Date.now(), refresh);
-        writtenToGoogle = await writeBraindumpItems(
+        const res = await writeBraindumpItems(
           db,
           target,
           makeGoogleCalendarApi(accessToken),
@@ -64,11 +66,13 @@ export default defineEventHandler(async (event) => {
           items,
           body.timeZone,
         );
+        writtenToGoogle = res.written;
+        needsReauth = res.needsReauth;
       }
     }
   } catch (error) {
     console.error("braindump Google write-back failed (non-fatal):", error);
   }
 
-  return { ...extractResult, memoriesSaved, writtenToGoogle };
+  return { ...extractResult, memoriesSaved, writtenToGoogle, needsReauth };
 });

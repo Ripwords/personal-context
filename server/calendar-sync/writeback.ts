@@ -4,7 +4,7 @@ import { type Db } from "../db/client";
 import { events, todos } from "../db/schema";
 import { type GoogleCreds } from "../auth/google-credentials";
 import { ensureBraindumpCalendar, type CalendarApi } from "./braindump-calendar";
-import { type EventWriteApi } from "./google-rest";
+import { type EventWriteApi, isAuthError } from "./google-rest";
 
 export type WritebackItem = {
   kind: "event" | "todo";
@@ -84,10 +84,17 @@ export function makeBraindumpMirror(
   };
 }
 
+export type WritebackResult = {
+  /** Number of items successfully mirrored to Google. */
+  written: number;
+  /** True if a write failed because the user must re-grant calendar permission. */
+  needsReauth: boolean;
+};
+
 /**
  * Mirror a batch of items to the account's "Braindump" Google calendar.
- * Best-effort per item — one failure won't abort the rest. Returns the count
- * successfully written.
+ * Best-effort per item — one failure won't abort the rest. Reports whether any
+ * failure was a permission/scope error so the UI can prompt a re-sign-in.
  */
 export async function writeBraindumpItems(
   db: Db,
@@ -96,17 +103,19 @@ export async function writeBraindumpItems(
   eventWriteApi: EventWriteApi,
   items: WritebackItem[],
   timeZone?: string,
-): Promise<number> {
-  if (items.length === 0) return 0;
+): Promise<WritebackResult> {
+  if (items.length === 0) return { written: 0, needsReauth: false };
   const mirror = makeBraindumpMirror(db, conn, calApi, eventWriteApi, timeZone);
   let written = 0;
+  let needsReauth = false;
   for (const item of items) {
     try {
       await mirror(item);
       written++;
     } catch (err) {
+      if (isAuthError(err)) needsReauth = true;
       console.error(`braindump writeback failed for ${item.kind} ${item.id}:`, err);
     }
   }
-  return written;
+  return { written, needsReauth };
 }

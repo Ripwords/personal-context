@@ -49,6 +49,22 @@ export type UserInfoApi = {
 
 // ── Write APIs (calendar provisioning + event creation) ─────────────────────
 
+/** Error carrying the Google HTTP status so callers can detect auth/scope failures. */
+export class GoogleApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GoogleApiError";
+  }
+}
+
+/** True for errors that mean "the user must re-consent" (missing/expired scope). */
+export function isAuthError(err: unknown): boolean {
+  return err instanceof GoogleApiError && (err.status === 401 || err.status === 403);
+}
+
 /** Create the "Braindump" calendar. Bound to an account's access token. */
 export function makeGoogleCalendarApi(accessToken: string, fetchImpl: typeof fetch = fetch) {
   return {
@@ -58,7 +74,7 @@ export function makeGoogleCalendarApi(accessToken: string, fetchImpl: typeof fet
         headers: { Authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
         body: JSON.stringify({ summary }),
       });
-      if (!res.ok) throw new Error(`create calendar failed: ${res.status}`);
+      if (!res.ok) throw new GoogleApiError(res.status, `create calendar failed: ${res.status}`);
       const json = (await res.json()) as { id: string };
       return { id: json.id };
     },
@@ -94,7 +110,7 @@ export function makeGoogleEventWriteApi(
           body: JSON.stringify(body),
         },
       );
-      if (!res.ok) throw new Error(`create event failed: ${res.status}`);
+      if (!res.ok) throw new GoogleApiError(res.status, `create event failed: ${res.status}`);
       const json = (await res.json()) as { id: string };
       return { id: json.id };
     },

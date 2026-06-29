@@ -29,10 +29,13 @@ interface SearchMemoryOutput {
   memories: string[];
 }
 
+type GoogleSync = "synced" | "needs-reauth" | "not-synced" | "off";
+
 interface CreateTodoOutput {
   created: "todo";
   id: string;
   title: string;
+  googleSync?: GoogleSync;
 }
 
 interface CreateEventOutput {
@@ -40,6 +43,13 @@ interface CreateEventOutput {
   id: string;
   title: string;
   error?: string;
+  googleSync?: GoogleSync;
+}
+
+function googleSyncNote(sync: GoogleSync | undefined): string {
+  if (sync === "synced") return " · ✓ Google";
+  if (sync === "needs-reauth") return " · ⚠ sign in again to sync";
+  return "";
 }
 
 interface CalendarEvent {
@@ -479,7 +489,7 @@ function formatTime(iso: string): string {
               <!-- create_todo output -->
               <template v-else-if="tp.toolName === 'create_todo'">
                 <p class="text-xs bd-faint px-1 tabular-nums">
-                  ✓ created todo: {{ asCreateTodo(tp.output).title }}
+                  ✓ created todo: {{ asCreateTodo(tp.output).title }}{{ googleSyncNote(asCreateTodo(tp.output).googleSync) }}
                 </p>
               </template>
 
@@ -492,7 +502,7 @@ function formatTime(iso: string): string {
                   · event not created: {{ asCreateEvent(tp.output).error }}
                 </p>
                 <p v-else class="text-xs bd-faint px-1 tabular-nums">
-                  ✓ created event: {{ asCreateEvent(tp.output).title }}
+                  ✓ created event: {{ asCreateEvent(tp.output).title }}{{ googleSyncNote(asCreateEvent(tp.output).googleSync) }}
                 </p>
               </template>
 

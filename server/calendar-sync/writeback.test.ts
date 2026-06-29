@@ -7,7 +7,7 @@ import { events as eventsTable } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { GoogleCreds } from "../auth/google-credentials";
 import type { CalendarApi } from "./braindump-calendar";
-import type { EventWriteApi } from "./google-rest";
+import { type EventWriteApi, GoogleApiError } from "./google-rest";
 
 const db = getTestDb();
 beforeEach(async () => {
@@ -58,10 +58,11 @@ test("writeBraindumpItems provisions the calendar, writes each item, and stamps 
     insert: async ({ calendarId, summary }) => { writes.push(`${calendarId}:${summary}`); return { id: `g-${summary}` }; },
   };
 
-  const n = await writeBraindumpItems(db, conn, calApi, eventWriteApi,
+  const res = await writeBraindumpItems(db, conn, calApi, eventWriteApi,
     [{ kind: "event", id: ev.id, title: "Standup", startsAt: ev.startsAt, endsAt: ev.endsAt }]);
 
-  expect(n).toBe(1);
+  expect(res.written).toBe(1);
+  expect(res.needsReauth).toBe(false);
   expect(createdCalendar).toBe("Braindump");
   expect(writes).toEqual(["braindump-cal-1:Standup"]);
 
@@ -69,4 +70,25 @@ test("writeBraindumpItems provisions the calendar, writes each item, and stamps 
   expect(row!.googleEventId).toBe("g-Standup");
   expect(row!.calendarId).toBe("braindump-cal-1");
   expect(row!.syncStatus).toBe("synced");
+});
+
+test("writeBraindumpItems reports needsReauth when calendar creation is forbidden (403)", async () => {
+  const ev = await createEvent(db, {
+    title: "Standup",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T09:15:00Z"),
+  });
+  const conn: GoogleCreds = {
+    accountId: "acc1", role: "personal", accessToken: "at", refreshToken: "rt", braindumpCalendarId: null,
+  };
+  const calApi: CalendarApi = {
+    insert: async () => { throw new GoogleApiError(403, "create calendar failed: 403"); },
+  };
+  const eventWriteApi: EventWriteApi = { insert: async () => ({ id: "x" }) };
+
+  const res = await writeBraindumpItems(db, conn, calApi, eventWriteApi,
+    [{ kind: "event", id: ev.id, title: "Standup", startsAt: ev.startsAt, endsAt: ev.endsAt }]);
+
+  expect(res.written).toBe(0);
+  expect(res.needsReauth).toBe(true);
 });

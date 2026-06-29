@@ -15,6 +15,8 @@ interface DumpResult {
   dumpId: string;
   created: CreatedItem[];
   memoriesSaved: number;
+  writtenToGoogle?: number;
+  needsReauth?: boolean;
 }
 
 const toast = useToast();
@@ -40,7 +42,17 @@ async function capture(): Promise<void> {
 
     lastCreated.value = result.created;
     text.value = "";
-    toast.add({ title: "Captured", color: "neutral" });
+    if (result.needsReauth) {
+      toast.add({
+        title: "Saved locally — not synced to Google",
+        description: "Sign in again to grant calendar access.",
+        color: "warning",
+      });
+    } else if (result.writtenToGoogle) {
+      toast.add({ title: `Captured · synced ${result.writtenToGoogle} to Google`, color: "success" });
+    } else {
+      toast.add({ title: "Captured", color: "neutral" });
+    }
     await activityFeed.value?.refresh();
     if (result.memoriesSaved > 0) {
       if (memoryCueTimer) clearTimeout(memoryCueTimer);

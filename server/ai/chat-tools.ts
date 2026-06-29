@@ -10,9 +10,13 @@ import { makeWebSearch } from "./web-search";
 import { createTodoFromInput, createEventFromInput } from "./extract";
 import { todoToolSchema, eventToolSchema } from "./tools";
 import type { WritebackItem } from "../calendar-sync/writeback";
+import { isAuthError } from "../calendar-sync/google-rest";
 
 /** Mirror an AI-created item to the user's Braindump Google calendar (best-effort). */
 export type MirrorFn = (item: WritebackItem) => Promise<void>;
+
+/** Result of a best-effort Google mirror, surfaced to the chat UI. */
+export type GoogleSync = "synced" | "needs-reauth" | "not-synced" | "off";
 
 /**
  * Build the AI SDK v7 tool set for the chat flow.
@@ -27,13 +31,15 @@ export function makeChatTools(
   env: Record<string, string | undefined> = process.env,
   mirror?: MirrorFn,
 ): ToolSet {
-  // Mirror to Google without ever failing the tool call.
-  async function safeMirror(item: WritebackItem): Promise<void> {
-    if (!mirror) return;
+  // Mirror to Google without ever failing the tool call; report the outcome.
+  async function safeMirror(item: WritebackItem): Promise<GoogleSync> {
+    if (!mirror) return "off";
     try {
       await mirror(item);
+      return "synced";
     } catch (err) {
       console.error(`chat writeback failed for ${item.kind} ${item.id}:`, err);
+      return isAuthError(err) ? "needs-reauth" : "not-synced";
     }
   }
 
@@ -46,14 +52,15 @@ export function makeChatTools(
         const projects = await listProjects(db);
         const item = await createTodoFromInput(db, inp, projects, null);
         // A timed reminder is mirrored to Google so it appears on every calendar.
+        let googleSync: GoogleSync = "off";
         if (inp.scheduledStart) {
           const start = new Date(inp.scheduledStart);
           if (!Number.isNaN(start.getTime())) {
             const end = inp.scheduledEnd ? new Date(inp.scheduledEnd) : new Date(start.getTime() + 30 * 60_000);
-            await safeMirror({ kind: "todo", id: item.id, title: item.title, startsAt: start, endsAt: end });
+            googleSync = await safeMirror({ kind: "todo", id: item.id, title: item.title, startsAt: start, endsAt: end });
           }
         }
-        return { created: "todo" as const, id: item.id, title: item.title };
+        return { created: "todo" as const, id: item.id, title: item.title, googleSync };
       },
     }),
 
@@ -72,14 +79,14 @@ export function makeChatTools(
             error: "Invalid startsAt or endsAt date — event was not created.",
           };
         }
-        await safeMirror({
+        const googleSync = await safeMirror({
           kind: "event",
           id: item.id,
           title: item.title,
           startsAt: new Date(inp.startsAt),
           endsAt: new Date(inp.endsAt),
         });
-        return { created: "event" as const, id: item.id, title: item.title };
+        return { created: "event" as const, id: item.id, title: item.title, googleSync };
       },
     }),
 
