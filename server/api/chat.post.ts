@@ -11,6 +11,10 @@ import { getDb } from "../db/client";
 import { getAuthSession } from "../utils/session";
 import { makeModel } from "../ai/model";
 import { makeChatTools } from "../ai/chat-tools";
+import { getGoogleConnections } from "../auth/google-credentials";
+import { getFreshAccessToken } from "../calendar-sync/access-token";
+import { makeGoogleTokenRefresher, makeGoogleCalendarApi, makeGoogleEventWriteApi } from "../calendar-sync/google-rest";
+import { makeBraindumpMirror, type WritebackItem } from "../calendar-sync/writeback";
 import { searchMemories } from "../db/queries/memory";
 import { listProjects } from "../db/queries/projects";
 import { createChatSession, addChatMessage } from "../db/queries/chats";
@@ -96,11 +100,27 @@ export default defineEventHandler(async (event) => {
 
   const modelMessages = await convertToModelMessages(messages);
 
+  // Lazily resolve the Braindump mirror: the connection + access token are only
+  // fetched the first time the assistant actually creates an event/timed todo.
+  let mirrorPromise: Promise<((item: WritebackItem) => Promise<void>) | null> | null = null;
+  const mirror = (item: WritebackItem) =>
+    (mirrorPromise ??= (async () => {
+      const conns = await getGoogleConnections(db);
+      const target = conns.find((c) => c.role === "personal") ?? conns[0];
+      if (!target) return null;
+      const refresh = makeGoogleTokenRefresher(
+        process.env.GOOGLE_CLIENT_ID ?? "",
+        process.env.GOOGLE_CLIENT_SECRET ?? "",
+      );
+      const at = await getFreshAccessToken(target, Date.now(), refresh);
+      return makeBraindumpMirror(db, target, makeGoogleCalendarApi(at), makeGoogleEventWriteApi(at), body.timeZone);
+    })()).then((m) => (m ? m(item) : undefined));
+
   const result = streamText({
     model: makeModel(),
     system,
     messages: modelMessages,
-    tools: makeChatTools(db),
+    tools: makeChatTools(db, process.env, mirror),
     stopWhen: stepCountIs(8),
     onFinish: async ({ text }) => {
       await addChatMessage(db, {

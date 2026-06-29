@@ -9,6 +9,10 @@ import { getCalendarFeed } from "../db/queries/calendar-feed";
 import { makeWebSearch } from "./web-search";
 import { createTodoFromInput, createEventFromInput } from "./extract";
 import { todoToolSchema, eventToolSchema } from "./tools";
+import type { WritebackItem } from "../calendar-sync/writeback";
+
+/** Mirror an AI-created item to the user's Braindump Google calendar (best-effort). */
+export type MirrorFn = (item: WritebackItem) => Promise<void>;
 
 /**
  * Build the AI SDK v7 tool set for the chat flow.
@@ -21,7 +25,18 @@ import { todoToolSchema, eventToolSchema } from "./tools";
 export function makeChatTools(
   db: Db,
   env: Record<string, string | undefined> = process.env,
+  mirror?: MirrorFn,
 ): ToolSet {
+  // Mirror to Google without ever failing the tool call.
+  async function safeMirror(item: WritebackItem): Promise<void> {
+    if (!mirror) return;
+    try {
+      await mirror(item);
+    } catch (err) {
+      console.error(`chat writeback failed for ${item.kind} ${item.id}:`, err);
+    }
+  }
+
   return {
     create_todo: tool({
       description:
@@ -30,6 +45,14 @@ export function makeChatTools(
       execute: async (inp) => {
         const projects = await listProjects(db);
         const item = await createTodoFromInput(db, inp, projects, null);
+        // A timed reminder is mirrored to Google so it appears on every calendar.
+        if (inp.scheduledStart) {
+          const start = new Date(inp.scheduledStart);
+          if (!Number.isNaN(start.getTime())) {
+            const end = inp.scheduledEnd ? new Date(inp.scheduledEnd) : new Date(start.getTime() + 30 * 60_000);
+            await safeMirror({ kind: "todo", id: item.id, title: item.title, startsAt: start, endsAt: end });
+          }
+        }
         return { created: "todo" as const, id: item.id, title: item.title };
       },
     }),
@@ -49,6 +72,13 @@ export function makeChatTools(
             error: "Invalid startsAt or endsAt date — event was not created.",
           };
         }
+        await safeMirror({
+          kind: "event",
+          id: item.id,
+          title: item.title,
+          startsAt: new Date(inp.startsAt),
+          endsAt: new Date(inp.endsAt),
+        });
         return { created: "event" as const, id: item.id, title: item.title };
       },
     }),

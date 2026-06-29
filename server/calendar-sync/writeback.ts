@@ -51,10 +51,43 @@ export async function resolveWritebackItems(
 }
 
 /**
- * Mirror items to the account's dedicated "Braindump" Google calendar so they
- * appear in Google and other clients. Stores the returned Google event id on
- * created event rows. Best-effort per item — one failure won't abort the rest.
- * Returns the number of items successfully written.
+ * Build a single-item mirror bound to one account. The "Braindump" calendar is
+ * provisioned lazily and memoized, so calling the returned function many times
+ * (e.g. once per chat tool call) creates the calendar at most once. Stores the
+ * Google event id back on created event rows.
+ */
+export function makeBraindumpMirror(
+  db: Db,
+  conn: GoogleCreds,
+  calApi: CalendarApi,
+  eventWriteApi: EventWriteApi,
+  timeZone?: string,
+): (item: WritebackItem) => Promise<void> {
+  let calIdPromise: Promise<string> | null = null;
+  const calendarId = () => (calIdPromise ??= ensureBraindumpCalendar(db, conn, calApi));
+
+  return async (item) => {
+    const cal = await calendarId();
+    const { id: gid } = await eventWriteApi.insert({
+      calendarId: cal,
+      summary: item.title,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      timeZone,
+    });
+    if (item.kind === "event") {
+      await db
+        .update(events)
+        .set({ googleEventId: gid, googleAccountId: conn.accountId, calendarId: cal, syncStatus: "synced" })
+        .where(eq(events.id, item.id));
+    }
+  };
+}
+
+/**
+ * Mirror a batch of items to the account's "Braindump" Google calendar.
+ * Best-effort per item — one failure won't abort the rest. Returns the count
+ * successfully written.
  */
 export async function writeBraindumpItems(
   db: Db,
@@ -65,23 +98,11 @@ export async function writeBraindumpItems(
   timeZone?: string,
 ): Promise<number> {
   if (items.length === 0) return 0;
-  const calendarId = await ensureBraindumpCalendar(db, conn, calApi);
+  const mirror = makeBraindumpMirror(db, conn, calApi, eventWriteApi, timeZone);
   let written = 0;
   for (const item of items) {
     try {
-      const { id: gid } = await eventWriteApi.insert({
-        calendarId,
-        summary: item.title,
-        startsAt: item.startsAt,
-        endsAt: item.endsAt,
-        timeZone,
-      });
-      if (item.kind === "event") {
-        await db
-          .update(events)
-          .set({ googleEventId: gid, googleAccountId: conn.accountId, calendarId, syncStatus: "synced" })
-          .where(eq(events.id, item.id));
-      }
+      await mirror(item);
       written++;
     } catch (err) {
       console.error(`braindump writeback failed for ${item.kind} ${item.id}:`, err);
