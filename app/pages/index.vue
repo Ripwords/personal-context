@@ -6,10 +6,18 @@ import { authClient } from "~/lib/auth-client";
 
 // ── Week navigation state ─────────────────────────────────────────────────
 
-const anchor = ref<Date>(startOfWeek(new Date()));
+// useWeek operates on UTC-midnight date markers. Seed it from the viewer's LOCAL
+// calendar date (not the raw instant) so "this week" is the local week even when
+// UTC has already rolled over to the next day.
+function localTodayMarker(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+}
+
+const anchor = ref<Date>(startOfWeek(localTodayMarker()));
 
 function goToToday(): void {
-  anchor.value = startOfWeek(new Date());
+  anchor.value = startOfWeek(localTodayMarker());
 }
 
 function prevWeek(): void {
@@ -26,8 +34,11 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-const fromISO = computed(() => days.value[0].toISOString());
-const toISO = computed(() => addDays(days.value[6], 1).toISOString());
+// Pad the fetch window by a day on each side: the visible week is a set of LOCAL
+// days, which can extend up to ~14h beyond the UTC-marker boundaries. The grid
+// buckets events into the 7 local columns, so over-fetching adjacent days is safe.
+const fromISO = computed(() => addDays(days.value[0], -1).toISOString());
+const toISO = computed(() => addDays(days.value[6], 2).toISOString());
 
 // ── View toggle ───────────────────────────────────────────────────────────
 

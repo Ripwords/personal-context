@@ -50,16 +50,23 @@ function formatHour(h: number): string {
   return `${h - 12} PM`;
 }
 
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
+// `day` columns come from useWeek as UTC-midnight markers for a calendar date.
+function dayMarkerKey(day: Date): string {
+  return `${day.getUTCFullYear()}-${day.getUTCMonth()}-${day.getUTCDate()}`;
+}
+// Timed events / todos / "today" are absolute instants — bucket them by the
+// viewer's LOCAL calendar date so a 9 AM event lands on the 9 AM row of its day.
+function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+// All-day events are floating dates stored at UTC midnight — match by UTC date
+// so they don't shift a day in either direction.
+function utcDayKey(d: Date): string {
+  return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
 }
 
 function minutesFromMidnight(d: Date): number {
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
+  return d.getHours() * 60 + d.getMinutes(); // local time-of-day
 }
 
 function blockStyle(start: Date, end: Date): Record<string, string> {
@@ -78,7 +85,7 @@ const eventsByDay = computed(() =>
   props.days.map((day) =>
     props.events
       .map((e) => ({ ...e, _start: new Date(e.startsAt), _end: new Date(e.endsAt) }))
-      .filter((e) => isSameDay(e._start, day)),
+      .filter((e) => localDayKey(e._start) === dayMarkerKey(day)),
   ),
 );
 
@@ -86,7 +93,7 @@ const allDayByDay = computed(() =>
   props.days.map((day) =>
     (props.allDayEvents ?? [])
       .map((e) => ({ ...e, _start: new Date(e.startsAt) }))
-      .filter((e) => isSameDay(e._start, day)),
+      .filter((e) => utcDayKey(e._start) === dayMarkerKey(day)),
   ),
 );
 
@@ -99,7 +106,7 @@ const todosByDay = computed(() =>
         _start: new Date(t.scheduledStart!),
         _end: new Date(t.scheduledEnd ?? t.scheduledStart!),
       }))
-      .filter((t) => isSameDay(t._start, day)),
+      .filter((t) => localDayKey(t._start) === dayMarkerKey(day)),
   ),
 );
 
@@ -121,7 +128,7 @@ onBeforeUnmount(() => {
 });
 
 function isToday(d: Date): boolean {
-  return isSameDay(d, today.value);
+  return dayMarkerKey(d) === localDayKey(today.value);
 }
 </script>
 
@@ -222,7 +229,7 @@ function isToday(d: Date): boolean {
               {{ ev.title }}
             </p>
             <p class="text-[10px] tabular-nums text-neutral-500 pl-1.5">
-              {{ ev._start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }) }}
+              {{ ev._start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) }}
             </p>
           </div>
 
