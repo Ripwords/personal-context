@@ -8,8 +8,8 @@ import { searchDocuments } from "../db/queries/documents";
 import { getCalendarFeed } from "../db/queries/calendar-feed";
 import { makeWebSearch } from "./web-search";
 import { createTodoFromInput, createEventFromInput } from "./extract";
-import { findEventsByTitle, deleteEvent } from "../db/queries/items";
-import { todoToolSchema, eventToolSchema } from "./tools";
+import { findEventsByTitle, deleteEvent, updateEvent } from "../db/queries/items";
+import { todoToolSchema, eventToolSchema, updateEventToolSchema } from "./tools";
 import type { WritebackItem } from "../calendar-sync/writeback";
 import { isAuthError } from "../calendar-sync/google-rest";
 
@@ -23,9 +23,20 @@ export type DeleteFromGoogleFn = (input: {
   eventId: string;
 }) => Promise<void>;
 
+/** Patch an event in Google (its source calendar/account). Best-effort. */
+export type UpdateInGoogleFn = (input: {
+  accountId: string;
+  calendarId: string;
+  eventId: string;
+  title?: string;
+  startsAt?: Date;
+  endsAt?: Date;
+}) => Promise<void>;
+
 export interface ChatToolDeps {
   mirror?: MirrorFn;
   deleteFromGoogle?: DeleteFromGoogleFn;
+  updateInGoogle?: UpdateInGoogleFn;
 }
 
 /** Result of a best-effort Google mirror, surfaced to the chat UI. */
@@ -44,7 +55,7 @@ export function makeChatTools(
   env: Record<string, string | undefined> = process.env,
   deps: ChatToolDeps = {},
 ): ToolSet {
-  const { mirror, deleteFromGoogle } = deps;
+  const { mirror, deleteFromGoogle, updateInGoogle } = deps;
 
   // Mirror to Google without ever failing the tool call; report the outcome.
   async function safeMirror(item: WritebackItem): Promise<GoogleSync> {
@@ -149,6 +160,52 @@ export function makeChatTools(
         }
         await deleteEvent(db, ev.id);
         return { deleted: true as const, title: ev.title, startsAt: ev.startsAt.toISOString() };
+      },
+    }),
+
+    update_event: tool({
+      description:
+        "Modify an existing event — rename and/or reschedule it. Use for 'move', " +
+        "'reschedule', 'rename', 'change' requests. Find by title (and date range if given).",
+      inputSchema: updateEventToolSchema,
+      execute: async ({ title, from, to, newTitle, newStartsAt, newEndsAt }) => {
+        const fromDate = from ? new Date(from) : undefined;
+        const toDate = to ? new Date(to) : undefined;
+        const matches = await findEventsByTitle(
+          db,
+          title,
+          fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined,
+          toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined,
+        );
+        if (matches.length === 0) return { updated: false as const, reason: "not-found" as const, query: title };
+        if (matches.length > 1) {
+          return {
+            updated: false as const,
+            reason: "ambiguous" as const,
+            matches: matches.map((m) => ({ title: m.title, startsAt: m.startsAt.toISOString() })),
+          };
+        }
+        const target = matches[0]!;
+        const next = await updateEvent(db, target.id, {
+          title: newTitle,
+          startsAt: newStartsAt ? new Date(newStartsAt) : undefined,
+          endsAt: newEndsAt ? new Date(newEndsAt) : undefined,
+        });
+        if (next && updateInGoogle && next.googleEventId && next.googleAccountId && next.calendarId) {
+          try {
+            await updateInGoogle({
+              accountId: next.googleAccountId,
+              calendarId: next.calendarId,
+              eventId: next.googleEventId,
+              title: next.title,
+              startsAt: next.startsAt,
+              endsAt: next.endsAt,
+            });
+          } catch (err) {
+            console.error(`update_event: Google patch failed for ${next.id}:`, err);
+          }
+        }
+        return { updated: true as const, title: next!.title, startsAt: next!.startsAt.toISOString() };
       },
     }),
 

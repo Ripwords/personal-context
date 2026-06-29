@@ -73,6 +73,14 @@ interface DeleteEventOutput {
   matches?: { title: string; startsAt: string }[];
 }
 
+interface UpdateEventOutput {
+  updated: boolean;
+  title?: string;
+  reason?: "not-found" | "ambiguous";
+  query?: string;
+  matches?: { title: string; startsAt: string }[];
+}
+
 // ── Typed tool part ───────────────────────────────────────────────────────────
 
 type ToolName =
@@ -82,6 +90,7 @@ type ToolName =
   | "create_todo"
   | "create_event"
   | "delete_event"
+  | "update_event"
   | "read_calendar";
 
 type ToolOutputMap = {
@@ -91,6 +100,7 @@ type ToolOutputMap = {
   create_todo: CreateTodoOutput;
   create_event: CreateEventOutput;
   delete_event: DeleteEventOutput;
+  update_event: UpdateEventOutput;
   read_calendar: ReadCalendarOutput;
 };
 
@@ -112,6 +122,7 @@ function isKnownTool(name: string): name is ToolName {
     "create_todo",
     "create_event",
     "delete_event",
+    "update_event",
     "read_calendar",
   ].includes(name);
 }
@@ -179,6 +190,9 @@ function asReadCalendar(output: unknown): ReadCalendarOutput {
 }
 function asDeleteEvent(output: unknown): DeleteEventOutput {
   return output as DeleteEventOutput;
+}
+function asUpdateEvent(output: unknown): UpdateEventOutput {
+  return output as UpdateEventOutput;
 }
 
 // ── Chat setup ────────────────────────────────────────────────────────────────
@@ -530,6 +544,19 @@ function formatTime(iso: string): string {
                 </p>
                 <p v-else class="text-xs bd-faint px-1">
                   · multiple matches — which one? {{ (asDeleteEvent(tp.output).matches ?? []).map((m) => m.title).join(", ") }}
+                </p>
+              </template>
+
+              <!-- update_event output -->
+              <template v-else-if="tp.toolName === 'update_event'">
+                <p v-if="asUpdateEvent(tp.output).updated" class="text-xs bd-faint px-1 tabular-nums">
+                  ✓ updated: {{ asUpdateEvent(tp.output).title }}
+                </p>
+                <p v-else-if="asUpdateEvent(tp.output).reason === 'not-found'" class="text-xs bd-faint px-1">
+                  · no event matching “{{ asUpdateEvent(tp.output).query }}”
+                </p>
+                <p v-else class="text-xs bd-faint px-1">
+                  · multiple matches — which one? {{ (asUpdateEvent(tp.output).matches ?? []).map((m) => m.title).join(", ") }}
                 </p>
               </template>
 

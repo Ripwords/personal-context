@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../db/test-helpers";
 import { createProject } from "../db/queries/projects";
-import { listActivity } from "../db/queries/items";
+import { listActivity, createEvent, findEventsByTitle } from "../db/queries/items";
 import { applyToolCalls } from "./extract";
 
 // Strategy: test applyToolCalls directly with hand-built tool-call objects.
@@ -33,7 +33,7 @@ test("applyToolCalls: creates a todo with resolved projectId and logs activity",
     },
   ];
 
-  const created = await applyToolCalls(db, dump.id, calls, [project]);
+  const { created } = await applyToolCalls(db, dump.id, calls, [project]);
 
   expect(created).toHaveLength(1);
   expect(created[0]!.kind).toBe("todo");
@@ -65,7 +65,7 @@ test("applyToolCalls: low confidence todo is flagged", async () => {
     },
   ];
 
-  const created = await applyToolCalls(db, dump.id, calls, [project]);
+  const { created } = await applyToolCalls(db, dump.id, calls, [project]);
 
   expect(created[0]!.lowConfidence).toBe(true);
   expect(created[0]!.confidence).toBe(0.3);
@@ -87,7 +87,7 @@ test("applyToolCalls: todo with no matching project gets null projectId", async 
     },
   ];
 
-  const created = await applyToolCalls(db, dump.id, calls, [project]);
+  const { created } = await applyToolCalls(db, dump.id, calls, [project]);
 
   expect(created[0]!.projectId).toBeNull();
 });
@@ -113,7 +113,7 @@ test("applyToolCalls: creates a calendar event with correct dates", async () => 
     },
   ];
 
-  const created = await applyToolCalls(db, dump.id, calls, [project]);
+  const { created } = await applyToolCalls(db, dump.id, calls, [project]);
 
   expect(created).toHaveLength(1);
   expect(created[0]!.kind).toBe("event");
@@ -146,7 +146,7 @@ test("applyToolCalls: event with invalid startsAt is skipped, valid todo in same
     },
   ];
 
-  const created = await applyToolCalls(db, dump.id, calls, []);
+  const { created } = await applyToolCalls(db, dump.id, calls, []);
 
   // Only the todo should be created; the bad event is skipped
   expect(created).toHaveLength(1);
@@ -157,6 +157,42 @@ test("applyToolCalls: event with invalid startsAt is skipped, valid todo in same
   const acts = await listActivity(db);
   expect(acts).toHaveLength(1);
   expect(acts[0]!.entityType).toBe("todo");
+});
+
+test("applyToolCalls: delete_event removes matching events and reports them with google identity", async () => {
+  const dump = { id: "00000000-0000-0000-0000-000000000000" };
+  await createEvent(db, {
+    title: "2pm meeting", startsAt: new Date("2026-07-01T06:00:00Z"), endsAt: new Date("2026-07-01T06:30:00Z"),
+    googleEventId: "g1", googleAccountId: "acc1", calendarId: "cal1",
+  });
+  await createEvent(db, {
+    title: "2pm meeting", startsAt: new Date("2026-07-01T06:00:00Z"), endsAt: new Date("2026-07-01T06:30:00Z"),
+  });
+
+  const { deleted } = await applyToolCalls(db, dump.id, [
+    { toolName: "delete_event", input: { title: "2pm meeting" } },
+  ], []);
+
+  expect(deleted.length).toBe(2);
+  expect(deleted.find((d) => d.googleEventId === "g1")).toBeDefined();
+  expect((await findEventsByTitle(db, "2pm meeting")).length).toBe(0);
+});
+
+test("applyToolCalls: update_event reschedules a single match and reports it", async () => {
+  await createEvent(db, {
+    title: "Standup", startsAt: new Date("2026-07-01T01:00:00Z"), endsAt: new Date("2026-07-01T01:15:00Z"),
+    googleEventId: "g9", googleAccountId: "acc1", calendarId: "cal1",
+  });
+
+  const { updated } = await applyToolCalls(db, "00000000-0000-0000-0000-000000000000", [
+    { toolName: "update_event", input: { title: "Standup", newStartsAt: "2026-07-01T02:00:00Z", newEndsAt: "2026-07-01T02:15:00Z" } },
+  ], []);
+
+  expect(updated.length).toBe(1);
+  expect(updated[0]!.startsAt).toBe("2026-07-01T02:00:00.000Z");
+  expect(updated[0]!.googleEventId).toBe("g9");
+  const [row] = await findEventsByTitle(db, "Standup");
+  expect(row!.startsAt.toISOString()).toBe("2026-07-01T02:00:00.000Z");
 });
 
 test("applyToolCalls: mixed calls produce multiple items and activity rows", async () => {
@@ -179,7 +215,7 @@ test("applyToolCalls: mixed calls produce multiple items and activity rows", asy
     },
   ];
 
-  const created = await applyToolCalls(db, dump.id, calls, []);
+  const { created } = await applyToolCalls(db, dump.id, calls, []);
 
   expect(created).toHaveLength(2);
   expect(created[0]!.kind).toBe("todo");

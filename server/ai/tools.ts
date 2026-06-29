@@ -29,8 +29,25 @@ export const eventToolSchema = z.object({
   confidence: z.number().min(0).max(1).describe("Confidence 0..1 that this is a real calendar event"),
 });
 
+export const deleteEventToolSchema = z.object({
+  title: z.string().describe("Words from the title of the EXISTING event to remove (case-insensitive substring)"),
+  from: z.string().datetime().optional().describe("ISO 8601 start of the day/range to search, if a date was given"),
+  to: z.string().datetime().optional().describe("ISO 8601 end of the day/range to search"),
+});
+
+export const updateEventToolSchema = z.object({
+  title: z.string().describe("Words from the title of the EXISTING event to modify (case-insensitive substring)"),
+  from: z.string().datetime().optional().describe("ISO 8601 start of the day/range to find the event"),
+  to: z.string().datetime().optional().describe("ISO 8601 end of the day/range to find the event"),
+  newTitle: z.string().optional().describe("New title, if renaming"),
+  newStartsAt: z.string().datetime().optional().describe("New ISO 8601 start, if rescheduling"),
+  newEndsAt: z.string().datetime().optional().describe("New ISO 8601 end, if rescheduling"),
+});
+
 export type TodoToolInput = z.infer<typeof todoToolSchema>;
 export type EventToolInput = z.infer<typeof eventToolSchema>;
+export type DeleteEventToolInput = z.infer<typeof deleteEventToolSchema>;
+export type UpdateEventToolInput = z.infer<typeof updateEventToolSchema>;
 
 // ── Tool definitions (no execute — we read tool calls and do DB writes ourselves) ──
 
@@ -46,7 +63,21 @@ export const createEventTool = tool({
   inputSchema: eventToolSchema,
 });
 
+export const deleteEventTool = tool({
+  description:
+    "Remove/cancel/delete an EXISTING calendar event the user asks to get rid of. Match by title (and date if given). Use this for 'remove', 'cancel', 'delete', 'drop' — never create an event for a removal request.",
+  inputSchema: deleteEventToolSchema,
+});
+
+export const updateEventTool = tool({
+  description:
+    "Modify an EXISTING calendar event — rename it or reschedule it. Use this for 'move', 'reschedule', 'rename', 'change' requests. Find by title, then set the new title and/or new start/end.",
+  inputSchema: updateEventToolSchema,
+});
+
 export const extractionTools = {
   create_todo: createTodoTool,
   create_event: createEventTool,
+  delete_event: deleteEventTool,
+  update_event: updateEventTool,
 } as const;

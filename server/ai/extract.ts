@@ -1,13 +1,33 @@
 import { generateText, stepCountIs } from "ai";
 import type { LanguageModel } from "ai";
 import type { Db, DbOrTx } from "../db/client";
-import type { Project } from "../db/schema";
-import { createDump, createTodo, createEvent, logActivity } from "../db/queries/items";
+import type { Project, EventRow } from "../db/schema";
+import {
+  createDump,
+  createTodo,
+  createEvent,
+  logActivity,
+  findEventsByTitle,
+  deleteEvent,
+  updateEvent,
+} from "../db/queries/items";
 import { listProjects } from "../db/queries/projects";
 import { extractionTools } from "./tools";
-import type { TodoToolInput, EventToolInput } from "./tools";
+import type { TodoToolInput, EventToolInput, DeleteEventToolInput, UpdateEventToolInput } from "./tools";
 
 // ── Types ──────────────────────────────────────────────────────────────────
+
+/** An event affected by a delete/update, carrying its Google identity so the
+ * dump endpoint can mirror the change to Google. */
+export type AffectedEvent = {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  googleEventId: string | null;
+  googleAccountId: string | null;
+  calendarId: string | null;
+};
 
 export type ExtractResult = {
   dumpId: string;
@@ -19,13 +39,29 @@ export type ExtractResult = {
     confidence: number | null;
     lowConfidence: boolean;
   }>;
+  deleted: AffectedEvent[];
+  updated: AffectedEvent[];
 };
 
 export type CreatedItem = ExtractResult["created"][number];
 
+function toAffected(e: EventRow): AffectedEvent {
+  return {
+    id: e.id,
+    title: e.title,
+    startsAt: e.startsAt.toISOString(),
+    endsAt: e.endsAt.toISOString(),
+    googleEventId: e.googleEventId,
+    googleAccountId: e.googleAccountId,
+    calendarId: e.calendarId,
+  };
+}
+
 type ToolCall =
   | { toolName: "create_todo"; input: TodoToolInput }
-  | { toolName: "create_event"; input: EventToolInput };
+  | { toolName: "create_event"; input: EventToolInput }
+  | { toolName: "delete_event"; input: DeleteEventToolInput }
+  | { toolName: "update_event"; input: UpdateEventToolInput };
 
 // ── Shared single-item create helpers (used by both dump and chat flows) ───
 
@@ -141,25 +177,61 @@ export async function applyToolCalls(
   dumpId: string,
   calls: ReadonlyArray<{ toolName: string; input: unknown }>,
   projects: ReadonlyArray<Project>,
-): Promise<ExtractResult["created"]> {
+): Promise<Pick<ExtractResult, "created" | "deleted" | "updated">> {
   return db.transaction(async (tx) => {
     const created: ExtractResult["created"] = [];
+    const deleted: AffectedEvent[] = [];
+    const updated: AffectedEvent[] = [];
 
     for (const call of calls) {
       if (call.toolName === "create_todo") {
         const inp = call.input as TodoToolInput;
-        const item = await createTodoFromInput(tx, inp, projects, dumpId);
-        created.push(item);
+        created.push(await createTodoFromInput(tx, inp, projects, dumpId));
       } else if (call.toolName === "create_event") {
         const inp = call.input as EventToolInput;
         const item = await createEventFromInput(tx, inp, projects, dumpId);
-        if (item !== null) {
-          created.push(item);
+        if (item !== null) created.push(item);
+      } else if (call.toolName === "delete_event") {
+        const inp = call.input as DeleteEventToolInput;
+        const matches = await findEventsByTitle(
+          tx,
+          inp.title,
+          inp.from ? new Date(inp.from) : undefined,
+          inp.to ? new Date(inp.to) : undefined,
+        );
+        // One-shot dump: remove every clear match (handles exact-title duplicates).
+        for (const ev of matches) {
+          const removed = await deleteEvent(tx, ev.id);
+          if (removed) {
+            deleted.push(toAffected(removed));
+            await logActivity(tx, { action: "delete", entityType: "event", entityId: removed.id, payload: { title: removed.title } });
+          }
+        }
+      } else if (call.toolName === "update_event") {
+        const inp = call.input as UpdateEventToolInput;
+        const matches = await findEventsByTitle(
+          tx,
+          inp.title,
+          inp.from ? new Date(inp.from) : undefined,
+          inp.to ? new Date(inp.to) : undefined,
+        );
+        // Only update an unambiguous single match — avoid mass-editing.
+        if (matches.length === 1) {
+          const target = matches[0]!;
+          const next = await updateEvent(tx, target.id, {
+            title: inp.newTitle,
+            startsAt: inp.newStartsAt ? new Date(inp.newStartsAt) : undefined,
+            endsAt: inp.newEndsAt ? new Date(inp.newEndsAt) : undefined,
+          });
+          if (next) {
+            updated.push(toAffected(next));
+            await logActivity(tx, { action: "update", entityType: "event", entityId: next.id, payload: { title: next.title } });
+          }
         }
       }
     }
 
-    return created;
+    return { created, deleted, updated };
   });
 }
 
@@ -188,14 +260,18 @@ export async function extractFromDump(
 
 The current local datetime is ${now.toLocaleString("en-US", { timeZone: timezone, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} (timezone ${timezone}). Resolve all relative dates and times (today, tomorrow, Friday, this weekend, 3pm) against it, and output absolute ISO 8601 datetimes.
 
-Extract concrete, actionable todos and calendar events from the user's text.
-For each item:
+Interpret the user's intent and call the right tool:
+- New tasks/events they mention → create_todo / create_event.
+- "remove", "cancel", "delete", "drop" an existing event → delete_event (match by title, plus from/to if a date is named). NEVER create an event to represent a removal.
+- "move", "reschedule", "rename", "change" an existing event → update_event (find by title, set newTitle and/or newStartsAt/newEndsAt).
+
+For each created item:
 - Pick the best-matching project name from this list (case-insensitive): ${projectNames}
   If no project fits, omit the project field.
 - For events, set realistic ISO 8601 start and end datetimes based on context clues (default to tomorrow if no time mentioned).
 - Set confidence (0..1) reflecting how certain you are this is a genuine todo or event.
 
-Only call the tools for items that are clearly actionable or scheduled. Do not invent items not implied by the text.`;
+Only call tools for things clearly implied by the text. Do not invent items.`;
 
   const result = await generateText({
     model,
@@ -205,9 +281,14 @@ Only call the tools for items that are clearly actionable or scheduled. Do not i
     stopWhen: stepCountIs(8),
   });
 
-  const created = await applyToolCalls(db, dump.id, result.toolCalls as ToolCall[], projects);
+  const { created, deleted, updated } = await applyToolCalls(
+    db,
+    dump.id,
+    result.toolCalls as ToolCall[],
+    projects,
+  );
 
-  return { dumpId: dump.id, created };
+  return { dumpId: dump.id, created, deleted, updated };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

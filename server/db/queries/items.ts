@@ -66,7 +66,7 @@ export async function listEventsInRange(
  * constrained to a [from, to) window. Used to resolve "remove the X meeting".
  */
 export async function findEventsByTitle(
-  db: Db,
+  db: DbOrTx,
   title: string,
   from?: Date,
   to?: Date,
@@ -83,6 +83,23 @@ export async function findEventsByTitle(
 
 export async function deleteEvent(db: DbOrTx, id: string): Promise<EventRow | null> {
   const [row] = await db.delete(events).where(eq(events.id, id)).returning();
+  return row ?? null;
+}
+
+export async function updateEvent(
+  db: DbOrTx,
+  id: string,
+  fields: { title?: string; startsAt?: Date; endsAt?: Date },
+): Promise<EventRow | null> {
+  const set: Partial<NewEventRow> = {};
+  if (fields.title !== undefined) set.title = fields.title;
+  if (fields.startsAt !== undefined) set.startsAt = fields.startsAt;
+  if (fields.endsAt !== undefined) set.endsAt = fields.endsAt;
+  if (Object.keys(set).length === 0) {
+    const [row] = await db.select().from(events).where(eq(events.id, id));
+    return row ?? null;
+  }
+  const [row] = await db.update(events).set(set).where(eq(events.id, id)).returning();
   return row ?? null;
 }
 

@@ -13,7 +13,7 @@ import { makeModel } from "../ai/model";
 import { makeChatTools } from "../ai/chat-tools";
 import { getGoogleConnections } from "../auth/google-credentials";
 import { getFreshAccessToken } from "../calendar-sync/access-token";
-import { makeGoogleTokenRefresher, makeGoogleCalendarApi, makeGoogleEventWriteApi, makeGoogleEventDeleteApi } from "../calendar-sync/google-rest";
+import { makeGoogleTokenRefresher, makeGoogleCalendarApi, makeGoogleEventWriteApi, makeGoogleEventDeleteApi, makeGoogleEventPatchApi } from "../calendar-sync/google-rest";
 import { makeBraindumpMirror, type WritebackItem } from "../calendar-sync/writeback";
 import { searchMemories } from "../db/queries/memory";
 import { listProjects } from "../db/queries/projects";
@@ -92,6 +92,7 @@ export default defineEventHandler(async (event) => {
     `\nTool guidance:`,
     `- Use create_todo / create_event to capture tasks and events the user mentions.`,
     `- To remove, cancel, delete, or drop an event the user no longer wants, use delete_event (match by title, plus from/to if they named a date). NEVER create an event to represent a deletion. If delete_event reports multiple matches, ask the user which one; if none, say so.`,
+    `- To move, reschedule, rename, or change an existing event, use update_event (find by title; set newTitle and/or newStartsAt/newEndsAt). Never create a duplicate to represent an edit.`,
     `- Use search_memory / search_documents before answering from memory.`,
     `- Use web_search for current or external information.`,
     `- Use read_calendar to check the user's schedule.`,
@@ -140,11 +141,26 @@ export default defineEventHandler(async (event) => {
     await makeGoogleEventDeleteApi(at).remove({ calendarId: input.calendarId, eventId: input.eventId });
   };
 
+  // Patch an event in the calendar/account it actually lives in.
+  const updateInGoogle = async (input: {
+    accountId: string; calendarId: string; eventId: string; title?: string; startsAt?: Date; endsAt?: Date;
+  }) => {
+    const at = await tokenFor({ accountId: input.accountId });
+    await makeGoogleEventPatchApi(at).patch({
+      calendarId: input.calendarId,
+      eventId: input.eventId,
+      summary: input.title,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      timeZone: body.timeZone,
+    });
+  };
+
   const result = streamText({
     model: makeModel(),
     system,
     messages: modelMessages,
-    tools: makeChatTools(db, process.env, { mirror, deleteFromGoogle }),
+    tools: makeChatTools(db, process.env, { mirror, deleteFromGoogle, updateInGoogle }),
     stopWhen: stepCountIs(8),
     onFinish: async ({ text }) => {
       await addChatMessage(db, {

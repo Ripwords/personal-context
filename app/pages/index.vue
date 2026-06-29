@@ -83,7 +83,14 @@ async function clearUnscheduled(): Promise<void> {
 // ── Brain dump quick capture (primary action) ──────────────────────────────
 
 interface CreatedItem { kind: "todo" | "event"; title: string }
-interface DumpResult { created: CreatedItem[]; memoriesSaved: number; writtenToGoogle?: number; needsReauth?: boolean }
+interface DumpResult {
+  created: CreatedItem[];
+  memoriesSaved: number;
+  writtenToGoogle?: number;
+  needsReauth?: boolean;
+  removedCount?: number;
+  updatedCount?: number;
+}
 
 const toast = useToast();
 const dumpText = ref<string>("");
@@ -105,9 +112,11 @@ async function submitDump(): Promise<void> {
     const parts: string[] = [];
     if (events) parts.push(`${events} event${events > 1 ? "s" : ""}`);
     if (todos) parts.push(`${todos} todo${todos > 1 ? "s" : ""}`);
+    if (res.removedCount) parts.push(`removed ${res.removedCount}`);
+    if (res.updatedCount) parts.push(`updated ${res.updatedCount}`);
     if (res.memoriesSaved) parts.push(`${res.memoriesSaved} memory`);
     toast.add({
-      title: parts.length ? `Sorted into ${parts.join(", ")}` : "Captured",
+      title: parts.length ? `Done — ${parts.join(", ")}` : "Captured",
       description: res.created.map((c) => c.title).slice(0, 3).join(" · ") || undefined,
       color: "neutral",
     });

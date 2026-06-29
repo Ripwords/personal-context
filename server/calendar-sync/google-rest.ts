@@ -91,6 +91,43 @@ export type EventWriteApi = {
   }): Promise<{ id: string }>;
 };
 
+export type EventPatchApi = {
+  patch(input: {
+    calendarId: string;
+    eventId: string;
+    summary?: string;
+    startsAt?: Date;
+    endsAt?: Date;
+    timeZone?: string;
+  }): Promise<void>;
+};
+
+export function makeGoogleEventPatchApi(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): EventPatchApi {
+  return {
+    async patch({ calendarId, eventId, summary, startsAt, endsAt, timeZone }) {
+      const body: Record<string, unknown> = {};
+      if (summary !== undefined) body.summary = summary;
+      if (startsAt) body.start = { dateTime: startsAt.toISOString(), ...(timeZone ? { timeZone } : {}) };
+      if (endsAt) body.end = { dateTime: endsAt.toISOString(), ...(timeZone ? { timeZone } : {}) };
+      if (Object.keys(body).length === 0) return;
+      const res = await fetchImpl(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!res.ok && res.status !== 410) {
+        throw new GoogleApiError(res.status, `patch event failed: ${res.status}`);
+      }
+    },
+  };
+}
+
 export type EventDeleteApi = {
   remove(input: { calendarId: string; eventId: string }): Promise<void>;
 };

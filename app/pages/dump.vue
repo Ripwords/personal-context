@@ -17,6 +17,8 @@ interface DumpResult {
   memoriesSaved: number;
   writtenToGoogle?: number;
   needsReauth?: boolean;
+  removedCount?: number;
+  updatedCount?: number;
 }
 
 const toast = useToast();
@@ -42,14 +44,19 @@ async function capture(): Promise<void> {
 
     lastCreated.value = result.created;
     text.value = "";
+    const changes: string[] = [];
+    if (result.removedCount) changes.push(`removed ${result.removedCount}`);
+    if (result.updatedCount) changes.push(`updated ${result.updatedCount}`);
+    const changeSuffix = changes.length ? ` · ${changes.join(", ")}` : "";
     if (result.needsReauth) {
       toast.add({
-        title: "Saved locally — not synced to Google",
+        title: `Saved locally${changeSuffix} — not synced to Google`,
         description: "Sign in again to grant calendar access.",
         color: "warning",
       });
-    } else if (result.writtenToGoogle) {
-      toast.add({ title: `Captured · synced ${result.writtenToGoogle} to Google`, color: "success" });
+    } else if (result.writtenToGoogle || changes.length) {
+      const synced = result.writtenToGoogle ? `synced ${result.writtenToGoogle} to Google` : "done";
+      toast.add({ title: `Captured${changeSuffix} · ${synced}`, color: "success" });
     } else {
       toast.add({ title: "Captured", color: "neutral" });
     }
