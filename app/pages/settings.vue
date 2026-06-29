@@ -5,22 +5,34 @@ type ConnectionRole = "personal" | "work";
 
 interface Connection {
   accountId: string;
+  email: string | null;
   role: ConnectionRole;
   braindumpCalendarId: string | null;
 }
 
 const { data: connections, refresh } = await useFetch<Connection[]>("/api/connections");
+const roleError = ref<string | null>(null);
+
+// Show the account's email; fall back to a shortened id until the calendar syncs.
+function accountLabel(c: Connection): string {
+  return c.email ?? `${c.accountId.slice(0, 10)}… (sign-in syncs email)`;
+}
 
 async function addAccount() {
   await authClient.linkSocial({ provider: "google", callbackURL: "/settings" });
 }
 
 async function setRole(accountId: string, role: ConnectionRole) {
-  await $fetch("/api/connections/role", {
-    method: "POST",
-    body: { accountId, role },
-  });
-  await refresh();
+  roleError.value = null;
+  try {
+    await $fetch("/api/connections/role", {
+      method: "POST",
+      body: { accountId, role },
+    });
+    await refresh();
+  } catch (err) {
+    roleError.value = err instanceof Error ? err.message : "Failed to update role";
+  }
 }
 </script>
 
@@ -48,13 +60,15 @@ async function setRole(accountId: string, role: ConnectionRole) {
           </UButton>
         </div>
 
+        <p v-if="roleError" class="text-xs text-red-600">{{ roleError }}</p>
+
         <ul v-if="connections && connections.length > 0" class="divide-y divide-neutral-200 border border-neutral-200 rounded-lg overflow-hidden">
           <li
             v-for="conn in connections"
             :key="conn.accountId"
             class="flex items-center justify-between px-4 py-3 bg-white"
           >
-            <span class="text-sm font-mono text-neutral-600 truncate max-w-xs">{{ conn.accountId }}</span>
+            <span class="text-sm text-neutral-700 truncate max-w-xs">{{ accountLabel(conn) }}</span>
             <div class="flex items-center gap-2 ml-4 shrink-0">
               <UButton
                 size="xs"
