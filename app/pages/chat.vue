@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useChat } from "@ai-sdk/vue";
 import {
   DefaultChatTransport,
@@ -159,9 +159,58 @@ function asReadCalendar(output: unknown): ReadCalendarOutput {
 
 // ── Chat setup ────────────────────────────────────────────────────────────────
 
+const currentSessionId = ref<string | null>(null);
+
 const { messages, sendMessage, status, error } = useChat({
-  transport: new DefaultChatTransport({ api: "/api/chat" }),
+  transport: new DefaultChatTransport({
+    api: "/api/chat",
+    body: () => ({ sessionId: currentSessionId.value ?? undefined }),
+  }),
 });
+
+// ── Session management ────────────────────────────────────────────────────────
+
+interface SessionSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+const sessions = ref<SessionSummary[]>([]);
+
+async function refreshSessions(): Promise<void> {
+  const data = await $fetch<SessionSummary[]>("/api/chats");
+  sessions.value = data;
+}
+
+onMounted(() => { void refreshSessions(); });
+
+async function newChat(): Promise<void> {
+  currentSessionId.value = null;
+  messages.value = [];
+}
+
+async function loadSession(id: string): Promise<void> {
+  currentSessionId.value = id;
+  const stored = await $fetch<{ id: string; role: string; content: string; createdAt: string }[]>(
+    `/api/chats/${id}`,
+  );
+  messages.value = stored.map((m) => ({
+    id: m.id,
+    role: m.role as "user" | "assistant",
+    parts: [{ type: "text" as const, text: m.content }],
+    metadata: {},
+  }));
+}
+
+async function deleteSession(id: string): Promise<void> {
+  await $fetch(`/api/chats/${id}`, { method: "DELETE" });
+  if (currentSessionId.value === id) {
+    currentSessionId.value = null;
+    messages.value = [];
+  }
+  await refreshSessions();
+}
 
 const input = ref<string>("");
 const scrollEl = ref<HTMLElement | null>(null);
@@ -174,7 +223,14 @@ async function submit(): Promise<void> {
   const text = input.value.trim();
   if (!text || isStreaming.value) return;
   input.value = "";
+  if (!currentSessionId.value) {
+    const data = await $fetch<{ id: string }>("/api/chats", { method: "POST" });
+    currentSessionId.value = data.id;
+    await refreshSessions();
+  }
   await sendMessage({ role: "user", parts: [{ type: "text", text }] });
+  // Refresh sidebar title after assistant responds (brief delay for onFinish)
+  setTimeout(() => { void refreshSessions(); }, 1500);
 }
 
 function handleKeydown(e: KeyboardEvent): void {
@@ -216,7 +272,61 @@ function formatTime(iso: string): string {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-neutral-50 text-neutral-900 flex flex-col">
+  <div class="min-h-dvh bg-neutral-50 text-neutral-900 flex">
+    <!-- Sidebar -->
+    <aside class="w-56 shrink-0 border-r border-neutral-200 bg-white flex flex-col">
+      <!-- New chat button -->
+      <div class="p-3 border-b border-neutral-200">
+        <button
+          class="w-full text-left text-sm px-3 py-2 rounded border border-neutral-200
+                 hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2
+                 focus-visible:ring-neutral-900 motion-safe:transition-colors"
+          @click="newChat"
+        >
+          + New chat
+        </button>
+      </div>
+
+      <!-- Session list -->
+      <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" aria-label="Chat history">
+        <div v-if="sessions.length === 0" class="text-xs text-neutral-400 px-3 py-2 select-none">
+          No chats yet
+        </div>
+        <div
+          v-for="s in sessions"
+          :key="s.id"
+          :class="[
+            'group flex items-center gap-1 rounded px-2 py-1.5 text-xs cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900',
+            currentSessionId === s.id
+              ? 'bg-neutral-900 text-white'
+              : 'text-neutral-700 hover:bg-neutral-100',
+          ]"
+          tabindex="0"
+          role="button"
+          :aria-current="currentSessionId === s.id ? 'true' : undefined"
+          :aria-label="`Open chat: ${s.title}`"
+          @click="loadSession(s.id)"
+          @keydown.enter="loadSession(s.id)"
+          @keydown.space.prevent="loadSession(s.id)"
+        >
+          <span class="flex-1 truncate">{{ s.title }}</span>
+          <button
+            class="shrink-0 opacity-0 group-hover:opacity-100 text-neutral-400
+                   hover:text-neutral-700 focus-visible:opacity-100 focus-visible:outline-none
+                   focus-visible:ring-1 focus-visible:ring-neutral-900 rounded"
+            :class="{ 'text-neutral-300 hover:text-white': currentSessionId === s.id }"
+            :aria-label="`Delete chat: ${s.title}`"
+            @click.stop="deleteSession(s.id)"
+          >
+            ×
+          </button>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main content -->
+    <div class="flex-1 flex flex-col min-w-0">
     <!-- Header -->
     <header
       class="flex items-center justify-between px-4 py-2 border-b border-neutral-200 bg-white shrink-0"
@@ -493,5 +603,6 @@ function formatTime(iso: string): string {
         </button>
       </form>
     </footer>
+    </div><!-- end main content -->
   </div>
 </template>
