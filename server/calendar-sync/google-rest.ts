@@ -43,6 +43,23 @@ export function makeGoogleEventsApi(fetchImpl: typeof fetch = fetch): EventsApi 
   };
 }
 
+export type UserInfoApi = {
+  email(input: { accessToken: string }): Promise<string | null>;
+};
+
+export function makeGoogleUserInfoApi(fetchImpl: typeof fetch = fetch): UserInfoApi {
+  return {
+    async email({ accessToken }) {
+      const res = await fetchImpl("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as { email?: string };
+      return json.email ?? null;
+    },
+  };
+}
+
 export function makeGoogleCalendarListApi(fetchImpl: typeof fetch = fetch): CalendarListApi {
   return {
     async list({ accessToken }) {
