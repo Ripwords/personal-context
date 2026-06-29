@@ -63,7 +63,7 @@ export function makeGoogleUserInfoApi(fetchImpl: typeof fetch = fetch): UserInfo
 export function makeGoogleCalendarListApi(fetchImpl: typeof fetch = fetch): CalendarListApi {
   return {
     async list({ accessToken }) {
-      const url = "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader";
+      const url = "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader&showHidden=true";
       const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) throw new Error(`calendarList failed: ${res.status}`);
       const json = (await res.json()) as { items?: RawGoogleCalendar[] };

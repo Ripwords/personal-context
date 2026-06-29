@@ -69,23 +69,76 @@ function minutesFromMidnight(d: Date): number {
   return d.getHours() * 60 + d.getMinutes(); // local time-of-day
 }
 
-function blockStyle(start: Date, end: Date): Record<string, string> {
+// Vertical placement (top/height) + horizontal placement (left/width) for an
+// event that shares its time slot with `ncols` columns, sitting in column `col`.
+function blockStyle(start: Date, end: Date, col = 0, ncols = 1): Record<string, string> {
   const top = (minutesFromMidnight(start) / 60) * HOUR_HEIGHT_PX;
   const height = Math.max(
     ((end.getTime() - start.getTime()) / 3_600_000) * HOUR_HEIGHT_PX,
     18, // minimum 18px so 0-minute events are visible
   );
+  const gap = 2; // px between side-by-side events
+  const widthPct = 100 / ncols;
   return {
     top: `${top}px`,
     height: `${height}px`,
+    left: `calc(${col * widthPct}% + ${col === 0 ? 2 : gap / 2}px)`,
+    width: `calc(${widthPct}% - ${ncols === 1 ? 4 : gap}px)`,
   };
+}
+
+// Assign overlapping events to side-by-side columns (Google-Calendar style):
+// build clusters of transitively-overlapping events, then place each in the
+// first free column; every event in a cluster shares the cluster's column count.
+type Positioned<T> = T & { _col: number; _ncols: number };
+function packColumns<T extends { _start: Date; _end: Date }>(evs: T[]): Positioned<T>[] {
+  const items = [...evs].sort(
+    (a, b) => a._start.getTime() - b._start.getTime() || a._end.getTime() - b._end.getTime(),
+  );
+  const out: Positioned<T>[] = [];
+  let cluster: T[] = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    const colEnds: number[] = []; // end time of the last event placed in each column
+    const colOf = new Map<T, number>();
+    for (const it of cluster) {
+      let placed = false;
+      for (let i = 0; i < colEnds.length; i++) {
+        if (it._start.getTime() >= colEnds[i]!) {
+          colOf.set(it, i);
+          colEnds[i] = it._end.getTime();
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        colOf.set(it, colEnds.length);
+        colEnds.push(it._end.getTime());
+      }
+    }
+    const ncols = colEnds.length;
+    for (const it of cluster) out.push({ ...it, _col: colOf.get(it)!, _ncols: ncols });
+    cluster = [];
+    clusterEnd = -Infinity;
+  };
+
+  for (const it of items) {
+    if (cluster.length && it._start.getTime() >= clusterEnd) flush();
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it._end.getTime());
+  }
+  if (cluster.length) flush();
+  return out;
 }
 
 const eventsByDay = computed(() =>
   props.days.map((day) =>
-    props.events
-      .map((e) => ({ ...e, _start: new Date(e.startsAt), _end: new Date(e.endsAt) }))
-      .filter((e) => localDayKey(e._start) === dayMarkerKey(day)),
+    packColumns(
+      props.events
+        .map((e) => ({ ...e, _start: new Date(e.startsAt), _end: new Date(e.endsAt) }))
+        .filter((e) => localDayKey(e._start) === dayMarkerKey(day)),
+    ),
   ),
 );
 
@@ -236,8 +289,8 @@ const nowLabel = computed(() =>
           <div
             v-for="ev in eventsByDay[colIdx]"
             :key="ev.id"
-            class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border-l-2"
-            :style="{ ...blockStyle(ev._start, ev._end), backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color) }"
+            class="absolute rounded px-1.5 overflow-hidden border-l-2"
+            :style="{ ...blockStyle(ev._start, ev._end, ev._col, ev._ncols), backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color) }"
           >
             <p class="text-[11px] leading-tight truncate pl-1.5 pt-0.5 bd-text">
               {{ ev.title }}
@@ -251,7 +304,7 @@ const nowLabel = computed(() =>
           <div
             v-for="todo in todosByDay[colIdx]"
             :key="todo.id"
-            class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border border-dashed bd-border bd-surface-2"
+            class="absolute rounded px-1.5 overflow-hidden border border-dashed bd-border bd-surface-2"
             :style="blockStyle(todo._start, todo._end)"
           >
             <div

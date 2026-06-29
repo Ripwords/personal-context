@@ -40,3 +40,21 @@ test("splits all-day events, attaches calendar color, and hides deselected calen
   expect(feed.allDayEvents.map((e) => e.title)).toEqual(["bday"]);
   expect(feed.allDayEvents[0]!.color).toBe("#16a765");
 });
+
+test("shows events whose calendar metadata has not synced yet (no google_calendar row)", async () => {
+  // Event references a calendar that has no row in google_calendar (e.g. a
+  // secondary Google calendar the calendarList sync hasn't captured).
+  await db.insert(eventsTable).values({
+    title: "orphan-cal-event",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleAccountId: "acc1",
+    calendarId: "jflc45@group.calendar.google.com",
+    googleEventId: "o1",
+    allDay: false,
+  });
+
+  const feed = await getCalendarFeed(db, new Date("2026-07-01T00:00:00Z"), new Date("2026-07-02T00:00:00Z"));
+  expect(feed.events.map((e) => e.title)).toContain("orphan-cal-event");
+  expect(feed.events.find((e) => e.title === "orphan-cal-event")!.color).toBeNull();
+});

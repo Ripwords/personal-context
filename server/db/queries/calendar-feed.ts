@@ -51,7 +51,10 @@ export async function listFeedEventsInRange(db: Db, from: Date, to: Date): Promi
       and(
         gte(events.startsAt, from),
         lt(events.startsAt, to),
-        or(isNull(events.calendarId), eq(googleCalendar.selected, true)),
+        // Show an event unless its calendar is EXPLICITLY toggled off. Local/AI
+        // events (no calendarId) and events whose calendar metadata hasn't synced
+        // yet both have a NULL selected → they stay visible.
+        or(isNull(googleCalendar.selected), eq(googleCalendar.selected, true)),
       ),
     )
     .orderBy(events.startsAt);
