@@ -73,3 +73,21 @@ export async function listActivity(db: Db, limit = 50): Promise<Activity[]> {
     .orderBy(desc(activities.createdAt))
     .limit(limit);
 }
+
+export async function dropTodo(db: DbOrTx, id: string): Promise<Todo | null> {
+  const [row] = await db
+    .update(todos)
+    .set({ status: "dropped" })
+    .where(eq(todos.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function dropAllUnscheduledTodos(db: DbOrTx): Promise<number> {
+  const rows = await db
+    .update(todos)
+    .set({ status: "dropped" })
+    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart)))
+    .returning({ id: todos.id });
+  return rows.length;
+}

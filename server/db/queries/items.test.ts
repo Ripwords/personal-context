@@ -10,6 +10,8 @@ import {
   listEventsInRange,
   logActivity,
   listActivity,
+  dropTodo,
+  dropAllUnscheduledTodos,
 } from "./items";
 
 const db = getTestDb();
@@ -79,4 +81,29 @@ test("activity log is returned newest first", async () => {
   const rows = await listActivity(db);
   expect(rows[0]!.action).toBe("update");
   expect(rows.length).toBe(2);
+});
+
+test("dropTodo marks a todo dropped and removes it from the unscheduled list", async () => {
+  const t = await createTodo(db, { title: "to-drop" });
+  const updated = await dropTodo(db, t.id);
+  expect(updated?.status).toBe("dropped");
+  expect((await listUnscheduledTodos(db)).length).toBe(0);
+});
+
+test("dropTodo returns null when the id does not exist", async () => {
+  const updated = await dropTodo(db, "00000000-0000-0000-0000-000000000000");
+  expect(updated).toBeNull();
+});
+
+test("dropAllUnscheduledTodos drops only open unscheduled todos and reports the count", async () => {
+  await createTodo(db, { title: "open-1" });
+  await createTodo(db, { title: "open-2" });
+  await createTodo(db, {
+    title: "scheduled",
+    scheduledStart: new Date("2026-07-01T09:00:00Z"),
+    scheduledEnd: new Date("2026-07-01T10:00:00Z"),
+  });
+  const count = await dropAllUnscheduledTodos(db);
+  expect(count).toBe(2);
+  expect((await listUnscheduledTodos(db)).length).toBe(0);
 });
