@@ -136,21 +136,21 @@ function excerpt(content: string, maxLen = 200): string {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-neutral-50 text-neutral-900 flex flex-col">
+  <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
     <header
-      class="flex items-center justify-between px-4 py-2 border-b border-neutral-200 bg-white shrink-0"
+      class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0"
     >
       <NuxtLink
         to="/"
-        class="text-sm text-neutral-500 hover:text-neutral-900 rounded
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+        class="text-sm bd-faint hover:text-[var(--bd-text)] rounded
+               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500
                motion-safe:transition-colors"
         aria-label="Back to calendar"
       >
         ← Calendar
       </NuxtLink>
-      <h1 class="text-sm font-medium text-neutral-700">Documents</h1>
+      <h1 class="text-sm font-medium bd-muted">Documents</h1>
       <div class="w-20" aria-hidden="true" />
     </header>
 
@@ -161,7 +161,7 @@ function excerpt(content: string, maxLen = 200): string {
       <section class="w-full flex flex-col gap-3" aria-labelledby="upload-heading">
         <h2
           id="upload-heading"
-          class="text-xs font-semibold tracking-widest uppercase text-neutral-400"
+          class="text-xs font-semibold tracking-widest uppercase bd-faint"
         >
           Upload document
         </h2>
@@ -173,19 +173,19 @@ function excerpt(content: string, maxLen = 200): string {
             type="file"
             accept=".txt,.md,.pdf"
             :disabled="uploading"
-            class="flex-1 text-sm text-neutral-700 file:mr-3 file:py-1.5 file:px-3
-                   file:rounded file:border file:border-neutral-200 file:bg-white
-                   file:text-xs file:font-medium file:text-neutral-700
-                   file:cursor-pointer hover:file:bg-neutral-50
-                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+            class="flex-1 text-sm bd-muted file:mr-3 file:py-1.5 file:px-3
+                   file:rounded file:border file:bd-border file:bg-[var(--bd-surface)]
+                   file:text-xs file:font-medium file:bd-muted
+                   file:cursor-pointer hover:file:bg-[var(--bd-surface-2)]
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500
                    disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <button
             type="button"
             :disabled="uploading"
-            class="px-4 py-2 rounded text-sm font-medium bg-neutral-900 text-white
+            class="px-4 py-2 rounded text-sm font-medium bg-[var(--bd-surface-2)] bd-text
                    hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed
-                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2
                    motion-safe:transition-colors"
             @click="handleUpload"
           >
@@ -193,14 +193,14 @@ function excerpt(content: string, maxLen = 200): string {
             <span v-else>Upload</span>
           </button>
         </div>
-        <p v-if="uploadError" class="text-xs text-neutral-500">{{ uploadError }}</p>
+        <p v-if="uploadError" class="text-xs bd-faint">{{ uploadError }}</p>
       </section>
 
       <!-- Search -->
       <section class="w-full flex flex-col gap-3" aria-labelledby="search-heading">
         <h2
           id="search-heading"
-          class="text-xs font-semibold tracking-widest uppercase text-neutral-400"
+          class="text-xs font-semibold tracking-widest uppercase bd-faint"
         >
           Search
         </h2>
@@ -210,43 +210,43 @@ function excerpt(content: string, maxLen = 200): string {
           v-model="searchQuery"
           type="search"
           placeholder="Search document content…"
-          class="w-full rounded border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900
-                 placeholder-neutral-400
-                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+          class="w-full rounded border bd-border bd-bg px-3 py-2 text-sm bd-text
+                 placeholder:text-[var(--bd-faint)]
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
           @input="onSearchInput"
         />
 
         <!-- Search results -->
         <div v-if="searchQuery.trim()">
-          <p v-if="searching" class="text-sm text-neutral-400">Searching…</p>
+          <p v-if="searching" class="text-sm bd-faint">Searching…</p>
 
           <div
             v-else-if="searchResults !== null"
           >
             <div
               v-if="searchResults.length === 0"
-              class="py-8 text-center text-sm text-neutral-400"
+              class="py-8 text-center text-sm bd-faint"
             >
               No matching content found.
             </div>
 
             <template v-else>
-              <p class="text-[11px] text-neutral-400 mb-2 tabular-nums">
+              <p class="text-[11px] bd-faint mb-2 tabular-nums">
                 {{ searchResults.length }} result{{ searchResults.length === 1 ? "" : "s" }}
               </p>
 
               <ul
-                class="divide-y divide-neutral-200 border border-neutral-200 rounded bg-white"
+                class="divide-y divide-neutral-800 border bd-border rounded bd-surface"
               >
               <li
                 v-for="(r, i) in searchResults"
                 :key="`${r.documentId}-${r.chunkIndex}-${i}`"
                 class="px-4 py-3 flex flex-col gap-1"
               >
-                <span class="text-[11px] font-medium text-neutral-500 tabular-nums">
+                <span class="text-[11px] font-medium bd-faint tabular-nums">
                   {{ r.filename }} · chunk {{ r.chunkIndex + 1 }}
                 </span>
-                <p class="text-sm text-neutral-800 leading-relaxed whitespace-pre-wrap">
+                <p class="text-sm bd-text leading-relaxed whitespace-pre-wrap">
                   {{ excerpt(r.content) }}
                 </p>
               </li>
@@ -260,24 +260,24 @@ function excerpt(content: string, maxLen = 200): string {
       <section class="w-full flex flex-col gap-3" aria-labelledby="docs-heading">
         <h2
           id="docs-heading"
-          class="text-xs font-semibold tracking-widest uppercase text-neutral-400"
+          class="text-xs font-semibold tracking-widest uppercase bd-faint"
         >
           Documents
         </h2>
 
-        <p v-if="deleteError" class="text-xs text-neutral-500">{{ deleteError }}</p>
+        <p v-if="deleteError" class="text-xs bd-faint">{{ deleteError }}</p>
 
         <!-- Empty state -->
         <div
           v-if="!documents || documents.length === 0"
-          class="py-16 text-center text-sm text-neutral-400"
+          class="py-16 text-center text-sm bd-faint"
         >
           No documents yet.
         </div>
 
         <ul
           v-else
-          class="divide-y divide-neutral-200 border border-neutral-200 rounded bg-white"
+          class="divide-y divide-neutral-800 border bd-border rounded bd-surface"
         >
           <li
             v-for="doc in documents"
@@ -285,16 +285,16 @@ function excerpt(content: string, maxLen = 200): string {
             class="flex items-center justify-between gap-4 px-4 py-3"
           >
             <div class="flex flex-col gap-0.5 min-w-0">
-              <span class="text-sm text-neutral-800 truncate">{{ doc.filename }}</span>
-              <span class="text-[11px] text-neutral-400 tabular-nums">
+              <span class="text-sm bd-text truncate">{{ doc.filename }}</span>
+              <span class="text-[11px] bd-faint tabular-nums">
                 {{ humanSize(doc.sizeBytes) }}
               </span>
             </div>
             <button
               type="button"
               :disabled="deletingId === doc.id"
-              class="shrink-0 text-xs text-neutral-500 hover:text-neutral-900
-                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+              class="shrink-0 text-xs bd-faint hover:text-[var(--bd-text)]
+                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                      disabled:opacity-40 motion-safe:transition-colors"
               :aria-label="`Delete ${doc.filename}`"
               @click="deleteDocument(doc.id)"

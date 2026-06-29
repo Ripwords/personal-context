@@ -133,19 +133,19 @@ function relativeTime(iso: string): string {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-neutral-50 text-neutral-900 flex flex-col">
+  <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
-    <header class="flex items-center justify-between px-4 py-2 border-b border-neutral-200 bg-white shrink-0">
+    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
       <NuxtLink
         to="/"
-        class="text-sm text-neutral-500 hover:text-neutral-900
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+        class="text-sm bd-faint hover:text-[var(--bd-text)]
+               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
         aria-label="Back to calendar"
       >
         ← Calendar
       </NuxtLink>
-      <h1 class="text-sm font-medium text-neutral-700">Memory</h1>
+      <h1 class="text-sm font-medium bd-muted">Memory</h1>
       <div class="w-20" aria-hidden="true" />
     </header>
 
@@ -154,7 +154,7 @@ function relativeTime(iso: string): string {
 
       <!-- Search -->
       <div class="w-full">
-        <label for="memory-search" class="text-xs font-semibold tracking-widest uppercase text-neutral-400 block mb-2">
+        <label for="memory-search" class="text-xs font-semibold tracking-widest uppercase bd-faint block mb-2">
           Search
         </label>
         <input
@@ -162,15 +162,15 @@ function relativeTime(iso: string): string {
           v-model="searchQuery"
           type="search"
           placeholder="Search memories…"
-          class="w-full rounded border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900
-                 placeholder-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+          class="w-full rounded border bd-border bd-bg px-3 py-2 text-sm bd-text
+                 placeholder:text-[var(--bd-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
           @input="onSearchInput"
         />
       </div>
 
       <!-- Add memory -->
       <div class="w-full flex flex-col gap-2">
-        <label for="memory-add" class="text-xs font-semibold tracking-widest uppercase text-neutral-400">
+        <label for="memory-add" class="text-xs font-semibold tracking-widest uppercase bd-faint">
           Add memory
         </label>
         <UTextarea
@@ -180,19 +180,19 @@ function relativeTime(iso: string): string {
           placeholder="Something worth remembering…"
           :disabled="adding"
           :ui="{
-            base: 'w-full resize-none rounded border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 disabled:opacity-50',
+            base: 'w-full resize-none rounded border border-[var(--bd-border)] bg-[var(--bd-bg)] px-3 py-2 text-sm text-[var(--bd-text)] placeholder:text-[var(--bd-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 disabled:opacity-50',
           }"
           @keydown.meta.enter="addMemory"
           @keydown.ctrl.enter="addMemory"
         />
-        <p v-if="addError" class="text-xs text-neutral-500">{{ addError }}</p>
+        <p v-if="addError" class="text-xs bd-faint">{{ addError }}</p>
         <div class="flex justify-end">
           <button
             type="button"
             :disabled="adding || !newContent.trim()"
-            class="px-4 py-2 rounded text-sm font-medium bg-neutral-900 text-white
+            class="px-4 py-2 rounded text-sm font-medium bg-[var(--bd-surface-2)] bd-text
                    hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed
-                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2
                    motion-safe:transition-colors"
             @click="addMemory"
           >
@@ -204,7 +204,7 @@ function relativeTime(iso: string): string {
 
       <!-- Memory list -->
       <section class="w-full" aria-label="Memories">
-        <p class="text-xs font-semibold tracking-widest uppercase text-neutral-400 mb-3">
+        <p class="text-xs font-semibold tracking-widest uppercase bd-faint mb-3">
           {{ displayed.length }} {{ displayed.length === 1 ? "memory" : "memories" }}
           <span v-if="searchQuery.trim()">&nbsp;matching "{{ searchQuery.trim() }}"</span>
         </p>
@@ -212,13 +212,13 @@ function relativeTime(iso: string): string {
         <p v-if="deleteError" class="text-xs text-red-600 mb-2">{{ deleteError }}</p>
 
         <!-- Empty state -->
-        <div v-if="displayed.length === 0" class="py-16 text-center text-sm text-neutral-400">
+        <div v-if="displayed.length === 0" class="py-16 text-center text-sm bd-faint">
           <span v-if="searchQuery.trim()">No memories match your search.</span>
           <span v-else>No memories yet. Add one above.</span>
         </div>
 
         <!-- List -->
-        <ul v-else class="divide-y divide-neutral-200 border border-neutral-200 rounded bg-white">
+        <ul v-else class="divide-y divide-neutral-800 border bd-border rounded bd-surface">
           <li
             v-for="m in displayed"
             :key="m.id"
@@ -226,16 +226,16 @@ function relativeTime(iso: string): string {
           >
             <!-- View mode -->
             <template v-if="editingId !== m.id">
-              <p class="text-sm text-neutral-800 whitespace-pre-wrap leading-relaxed">{{ m.content }}</p>
+              <p class="text-sm bd-text whitespace-pre-wrap leading-relaxed">{{ m.content }}</p>
               <div class="flex items-center justify-between gap-4">
-                <span class="text-[11px] text-neutral-400">
+                <span class="text-[11px] bd-faint">
                   {{ m.source }} · {{ relativeTime(m.createdAt) }}
                 </span>
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
-                    class="text-xs text-neutral-500 hover:text-neutral-900 focus-visible:outline-none
-                           focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+                    class="text-xs bd-faint hover:text-[var(--bd-text)] focus-visible:outline-none
+                           focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                            motion-safe:transition-colors"
                     @click="startEdit(m)"
                   >
@@ -244,8 +244,8 @@ function relativeTime(iso: string): string {
                   <button
                     type="button"
                     :disabled="deletingId === m.id"
-                    class="text-xs text-neutral-500 hover:text-neutral-900 focus-visible:outline-none
-                           focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+                    class="text-xs bd-faint hover:text-[var(--bd-text)] focus-visible:outline-none
+                           focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                            disabled:opacity-40 motion-safe:transition-colors"
                     @click="deleteMemory(m.id)"
                   >
@@ -263,7 +263,7 @@ function relativeTime(iso: string): string {
                 :rows="3"
                 :disabled="saving"
                 :ui="{
-                  base: 'w-full resize-none rounded border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 disabled:opacity-50',
+                  base: 'w-full resize-none rounded border border-[var(--bd-border)] bg-[var(--bd-bg)] px-3 py-2 text-sm text-[var(--bd-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 disabled:opacity-50',
                 }"
                 @keydown.meta.enter="saveEdit(m.id)"
                 @keydown.ctrl.enter="saveEdit(m.id)"
@@ -273,8 +273,8 @@ function relativeTime(iso: string): string {
               <div class="flex items-center gap-2 justify-end">
                 <button
                   type="button"
-                  class="text-xs text-neutral-500 hover:text-neutral-900 focus-visible:outline-none
-                         focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+                  class="text-xs bd-faint hover:text-[var(--bd-text)] focus-visible:outline-none
+                         focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                          motion-safe:transition-colors"
                   @click="cancelEdit"
                 >
@@ -283,9 +283,9 @@ function relativeTime(iso: string): string {
                 <button
                   type="button"
                   :disabled="saving || !editContent.trim()"
-                  class="px-3 py-1 rounded text-xs font-medium bg-neutral-900 text-white
+                  class="px-3 py-1 rounded text-xs font-medium bg-[var(--bd-surface-2)] bd-text
                          hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500
                          motion-safe:transition-colors"
                   @click="saveEdit(m.id)"
                 >

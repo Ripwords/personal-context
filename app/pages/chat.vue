@@ -316,7 +316,7 @@ function formatTime(iso: string): string {
           <span class="flex-1 truncate">{{ s.title }}</span>
           <button
             class="shrink-0 opacity-0 group-hover:opacity-100 bd-faint
-                   hover:bd-text focus-visible:opacity-100 focus-visible:outline-none
+                   hover:text-[var(--bd-text)] focus-visible:opacity-100 focus-visible:outline-none
                    focus-visible:ring-1 focus-visible:ring-neutral-500 rounded"
             :class="{ 'bd-faint hover:text-white': currentSessionId === s.id }"
             :aria-label="`Delete chat: ${s.title}`"
@@ -336,7 +336,7 @@ function formatTime(iso: string): string {
     >
       <NuxtLink
         to="/"
-        class="text-sm bd-faint hover:bd-text focus-visible:outline-none
+        class="text-sm bd-faint hover:text-[var(--bd-text)] focus-visible:outline-none
                focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
         aria-label="Back to calendar"

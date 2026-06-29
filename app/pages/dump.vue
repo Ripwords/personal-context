@@ -66,7 +66,7 @@ async function capture(): Promise<void> {
     <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
       <NuxtLink
         to="/"
-        class="text-sm bd-faint hover:bd-text
+        class="text-sm bd-faint hover:text-[var(--bd-text)]
                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
         aria-label="Back to calendar"

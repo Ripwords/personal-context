@@ -26,7 +26,7 @@ const emit = defineEmits<{
       <button
         v-if="todos.length > 0"
         type="button"
-        class="text-[10px] font-medium bd-faint hover:bd-text
+        class="text-[10px] font-medium bd-faint hover:text-[var(--bd-text)]
                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
         @click="emit('clear-all')"
@@ -53,7 +53,7 @@ const emit = defineEmits<{
         <button
           type="button"
           class="shrink-0 bd-faint opacity-0 group-hover:opacity-100
-                 hover:bd-text focus-visible:opacity-100 focus-visible:outline-none
+                 hover:text-[var(--bd-text)] focus-visible:opacity-100 focus-visible:outline-none
                  focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                  motion-safe:transition-opacity"
           :aria-label="`Clear ${todo.title}`"

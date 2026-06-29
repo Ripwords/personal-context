@@ -259,12 +259,12 @@ const monthTitle = computed(() =>
           <div class="absolute right-0 mt-1 w-44 z-20 rounded-lg border bd-border bd-surface py-1 shadow-xl shadow-black/40">
             <NuxtLink
               v-for="l in navLinks" :key="l.to" :to="l.to" @click="menuOpen = false"
-              class="block px-3 py-1.5 text-sm bd-muted hover:bd-text bd-hover motion-safe:transition-colors"
+              class="block px-3 py-1.5 text-sm bd-muted hover:text-[var(--bd-text)] bd-hover motion-safe:transition-colors"
             >{{ l.label }}</NuxtLink>
             <div class="my-1 border-t bd-border" />
             <button
               type="button" @click="handleSignOut"
-              class="block w-full text-left px-3 py-1.5 text-sm bd-muted hover:bd-text bd-hover motion-safe:transition-colors"
+              class="block w-full text-left px-3 py-1.5 text-sm bd-muted hover:text-[var(--bd-text)] bd-hover motion-safe:transition-colors"
             >Sign out</button>
           </div>
         </template>

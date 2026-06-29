@@ -77,23 +77,23 @@ function fmtTime(iso: string): string {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-neutral-50 text-neutral-900 flex flex-col">
+  <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
-    <header class="flex items-center justify-between px-4 py-2 border-b border-neutral-200 bg-white shrink-0">
+    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
       <NuxtLink
         to="/"
-        class="text-sm text-neutral-500 hover:text-neutral-900
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+        class="text-sm bd-faint hover:text-[var(--bd-text)]
+               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
         aria-label="Back to calendar"
       >
         ← Calendar
       </NuxtLink>
-      <h1 class="text-sm font-medium text-neutral-700">Wind down</h1>
+      <h1 class="text-sm font-medium bd-muted">Wind down</h1>
       <NuxtLink
         to="/dump"
-        class="text-sm text-neutral-500 hover:text-neutral-900
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+        class="text-sm bd-faint hover:text-[var(--bd-text)]
+               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
       >
         Dump
@@ -107,9 +107,9 @@ function fmtTime(iso: string): string {
         <button
           type="button"
           :disabled="loading"
-          class="px-4 py-2 rounded text-sm font-medium bg-neutral-900 text-white
+          class="px-4 py-2 rounded text-sm font-medium bg-[var(--bd-surface-2)] bd-text
                  hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed
-                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2
                  motion-safe:transition-colors"
           @click="summarize"
         >
@@ -122,24 +122,24 @@ function fmtTime(iso: string): string {
       <template v-if="proposal">
         <!-- Groups -->
         <section class="w-full flex flex-col gap-4">
-          <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-400">
+          <h2 class="text-xs font-semibold tracking-widest uppercase bd-faint">
             Today's todos by project
           </h2>
           <div
             v-for="group in proposal.groups"
             :key="group.project ?? '__none__'"
-            class="border border-neutral-200 rounded bg-white"
+            class="border bd-border rounded bd-surface"
           >
-            <div class="px-4 py-2 border-b border-neutral-100">
-              <span class="text-xs font-semibold text-neutral-700 uppercase tracking-wide">
+            <div class="px-4 py-2 border-b bd-border">
+              <span class="text-xs font-semibold bd-muted uppercase tracking-wide">
                 {{ group.project ?? "No project" }}
               </span>
             </div>
-            <ul class="divide-y divide-neutral-100">
+            <ul class="divide-y divide-neutral-800">
               <li
                 v-for="item in group.items"
                 :key="item.todoId"
-                class="px-4 py-2 text-sm text-neutral-800"
+                class="px-4 py-2 text-sm bd-text"
               >
                 {{ item.title }}
               </li>
@@ -149,19 +149,19 @@ function fmtTime(iso: string): string {
 
         <!-- Schedule -->
         <section class="w-full flex flex-col gap-4">
-          <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-400">
+          <h2 class="text-xs font-semibold tracking-widest uppercase bd-faint">
             Proposed schedule for tomorrow
           </h2>
-          <div class="border border-neutral-200 rounded bg-white divide-y divide-neutral-100">
+          <div class="border bd-border rounded bd-surface divide-y divide-neutral-800">
             <div
               v-for="slot in proposal.schedule"
               :key="slot.todoId"
               class="flex items-center gap-4 px-4 py-3"
             >
-              <span class="shrink-0 text-sm tabular-nums font-mono text-neutral-500">
+              <span class="shrink-0 text-sm tabular-nums font-mono bd-faint">
                 {{ fmtTime(slot.startsAt) }} – {{ fmtTime(slot.endsAt) }}
               </span>
-              <span class="flex-1 text-sm text-neutral-800">{{ slot.title }}</span>
+              <span class="flex-1 text-sm bd-text">{{ slot.title }}</span>
             </div>
           </div>
         </section>
@@ -171,9 +171,9 @@ function fmtTime(iso: string): string {
           <button
             type="button"
             :disabled="applying"
-            class="px-4 py-2 rounded text-sm font-medium border border-neutral-900 text-neutral-900 bg-white
-                   hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed
-                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2
+            class="px-4 py-2 rounded text-sm font-medium border bd-border bd-text bd-surface
+                   bd-hover disabled:opacity-40 disabled:cursor-not-allowed
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2
                    motion-safe:transition-colors"
             @click="applySchedule"
           >

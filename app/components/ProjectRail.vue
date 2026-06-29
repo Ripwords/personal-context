@@ -21,7 +21,7 @@ const emit = defineEmits<{
     class="flex flex-col gap-1 px-3 py-4 overflow-y-auto"
     aria-label="Projects"
   >
-    <p class="text-[10px] font-semibold tracking-widest uppercase text-neutral-400 px-2 mb-2">
+    <p class="text-[10px] font-semibold tracking-widest uppercase bd-faint px-2 mb-2">
       Projects
     </p>
 
@@ -30,9 +30,9 @@ const emit = defineEmits<{
       :key="project.id"
       type="button"
       class="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors
-             hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2
-             focus-visible:ring-neutral-900"
-      :class="activeIds.has(project.id) ? 'text-neutral-900' : 'text-neutral-400'"
+             bd-hover focus-visible:outline-none focus-visible:ring-2
+             focus-visible:ring-neutral-500"
+      :class="activeIds.has(project.id) ? 'text-[var(--bd-text)]' : 'text-[var(--bd-faint)]'"
       :aria-pressed="activeIds.has(project.id)"
       @click="emit('toggle', project.id)"
     >
@@ -45,7 +45,7 @@ const emit = defineEmits<{
       <span class="truncate">{{ project.name }}</span>
     </button>
 
-    <p v-if="projects.length === 0" class="px-2 text-xs text-neutral-400">
+    <p v-if="projects.length === 0" class="px-2 text-xs bd-faint">
       No projects yet.
     </p>
   </nav>
