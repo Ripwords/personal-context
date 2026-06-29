@@ -1,7 +1,163 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
 import { useChat } from "@ai-sdk/vue";
-import { DefaultChatTransport, isDynamicToolUIPart, isStaticToolUIPart, type UIMessage } from "ai";
+import {
+  DefaultChatTransport,
+  isDynamicToolUIPart,
+  isStaticToolUIPart,
+  type UIMessage,
+} from "ai";
+
+// ── Tool output interfaces ────────────────────────────────────────────────────
+
+interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+interface WebSearchOutput {
+  configured: boolean;
+  results: WebSearchResult[];
+  note?: string;
+}
+
+interface SearchDocumentsOutput {
+  chunks: { filename: string; content: string }[];
+}
+
+interface SearchMemoryOutput {
+  memories: string[];
+}
+
+interface CreateTodoOutput {
+  created: "todo";
+  id: string;
+  title: string;
+}
+
+interface CreateEventOutput {
+  created: "event";
+  id: string;
+  title: string;
+  error?: string;
+}
+
+interface CalendarEvent {
+  title: string;
+  startsAt: string;
+  endsAt: string;
+}
+
+interface ReadCalendarOutput {
+  events: CalendarEvent[];
+  scheduledTodos: { title: string }[];
+  unscheduledTodos: { title: string }[];
+  error?: string;
+}
+
+// ── Typed tool part ───────────────────────────────────────────────────────────
+
+type ToolName =
+  | "web_search"
+  | "search_documents"
+  | "search_memory"
+  | "create_todo"
+  | "create_event"
+  | "read_calendar";
+
+type ToolOutputMap = {
+  web_search: WebSearchOutput;
+  search_documents: SearchDocumentsOutput;
+  search_memory: SearchMemoryOutput;
+  create_todo: CreateTodoOutput;
+  create_event: CreateEventOutput;
+  read_calendar: ReadCalendarOutput;
+};
+
+type ToolState = "input-streaming" | "input-available" | "output-available" | "error";
+
+interface ToolPart {
+  toolName: ToolName;
+  toolCallId: string;
+  state: ToolState;
+  // output is narrowed safely via accessor functions after checking toolName
+  output: unknown;
+}
+
+function isKnownTool(name: string): name is ToolName {
+  return [
+    "web_search",
+    "search_documents",
+    "search_memory",
+    "create_todo",
+    "create_event",
+    "read_calendar",
+  ].includes(name);
+}
+
+function extractToolParts(msg: UIMessage): ToolPart[] {
+  const parts: ToolPart[] = [];
+  for (const part of msg.parts) {
+    if (isDynamicToolUIPart(part)) {
+      const name = part.toolName;
+      if (isKnownTool(name)) {
+        parts.push({
+          toolName: name,
+          toolCallId: part.toolCallId,
+          state: part.state as ToolState,
+          output: part.output as ToolOutputMap[typeof name],
+        });
+      } else {
+        parts.push({
+          toolName: name as ToolName,
+          toolCallId: part.toolCallId,
+          state: part.state as ToolState,
+          output: part.output as unknown,
+        });
+      }
+    } else if (isStaticToolUIPart(part)) {
+      const name = (part.type as string).replace(/^tool-/, "");
+      if (isKnownTool(name)) {
+        parts.push({
+          toolName: name,
+          toolCallId: part.toolCallId,
+          state: part.state as ToolState,
+          output: part.output as ToolOutputMap[typeof name],
+        });
+      } else {
+        parts.push({
+          toolName: name as ToolName,
+          toolCallId: part.toolCallId,
+          state: part.state as ToolState,
+          output: part.output as unknown,
+        });
+      }
+    }
+  }
+  return parts;
+}
+
+// Typed output accessors (safe casts after toolName check)
+function asWebSearch(output: unknown): WebSearchOutput {
+  return output as WebSearchOutput;
+}
+function asSearchDocuments(output: unknown): SearchDocumentsOutput {
+  return output as SearchDocumentsOutput;
+}
+function asSearchMemory(output: unknown): SearchMemoryOutput {
+  return output as SearchMemoryOutput;
+}
+function asCreateTodo(output: unknown): CreateTodoOutput {
+  return output as CreateTodoOutput;
+}
+function asCreateEvent(output: unknown): CreateEventOutput {
+  return output as CreateEventOutput;
+}
+function asReadCalendar(output: unknown): ReadCalendarOutput {
+  return output as ReadCalendarOutput;
+}
+
+// ── Chat setup ────────────────────────────────────────────────────────────────
 
 const { messages, sendMessage, status, error } = useChat({
   transport: new DefaultChatTransport({ api: "/api/chat" }),
@@ -10,7 +166,6 @@ const { messages, sendMessage, status, error } = useChat({
 const input = ref<string>("");
 const scrollEl = ref<HTMLElement | null>(null);
 
-// ChatStatus: 'submitted' | 'streaming' | 'ready' | 'error'
 const isStreaming = computed(
   () => status.value === "submitted" || status.value === "streaming",
 );
@@ -29,7 +184,6 @@ function handleKeydown(e: KeyboardEvent): void {
   }
 }
 
-// Auto-scroll to bottom when messages change
 watch(
   messages,
   async () => {
@@ -39,7 +193,6 @@ watch(
   { deep: true },
 );
 
-// Helper: extract text content from a UIMessage
 function messageText(msg: UIMessage): string {
   return msg.parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -47,61 +200,18 @@ function messageText(msg: UIMessage): string {
     .join("");
 }
 
-// Helper: extract tool invocations from a UIMessage
-interface ToolNote {
-  key: string;
-  label: string;
-}
-
-function toolNotes(msg: UIMessage): ToolNote[] {
-  const notes: ToolNote[] = [];
-  for (const part of msg.parts) {
-    if (isDynamicToolUIPart(part)) {
-      const toolName = part.toolName;
-      if (part.state === "output-available") {
-        const result = part.output as Record<string, unknown> | undefined;
-        let label = `· used ${toolName}`;
-        if (result && "created" in result) {
-          label = `· created ${String(result.created)}: ${String(result.title ?? "")}`;
-        } else if (result && "memories" in result) {
-          const arr = result.memories as unknown[];
-          label = `· recalled ${arr.length} memor${arr.length === 1 ? "y" : "ies"}`;
-        } else if (result && "chunks" in result) {
-          const arr = result.chunks as unknown[];
-          label = `· found ${arr.length} document chunk${arr.length === 1 ? "" : "s"}`;
-        } else if (result && "events" in result) {
-          const arr = result.events as unknown[];
-          label = `· read calendar (${arr.length} event${arr.length === 1 ? "" : "s"})`;
-        }
-        notes.push({ key: `${toolName}-${part.toolCallId}`, label });
-      } else if (part.state === "input-streaming" || part.state === "input-available") {
-        notes.push({ key: `${toolName}-${part.toolCallId}`, label: `· calling ${toolName}…` });
-      }
-    } else if (isStaticToolUIPart(part)) {
-      // type is 'tool-<name>'; extract name from type string
-      const toolName = (part.type as string).replace(/^tool-/, "");
-      if (part.state === "output-available") {
-        const result = part.output as Record<string, unknown> | undefined;
-        let label = `· used ${toolName}`;
-        if (result && "created" in result) {
-          label = `· created ${String(result.created)}: ${String(result.title ?? "")}`;
-        } else if (result && "memories" in result) {
-          const arr = result.memories as unknown[];
-          label = `· recalled ${arr.length} memor${arr.length === 1 ? "y" : "ies"}`;
-        } else if (result && "chunks" in result) {
-          const arr = result.chunks as unknown[];
-          label = `· found ${arr.length} document chunk${arr.length === 1 ? "" : "s"}`;
-        } else if (result && "events" in result) {
-          const arr = result.events as unknown[];
-          label = `· read calendar (${arr.length} event${arr.length === 1 ? "" : "s"})`;
-        }
-        notes.push({ key: `${toolName}-${part.toolCallId}`, label });
-      } else if (part.state === "input-streaming" || part.state === "input-available") {
-        notes.push({ key: `${toolName}-${part.toolCallId}`, label: `· calling ${toolName}…` });
-      }
-    }
+// Date formatting for calendar events
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
   }
-  return notes;
 }
 </script>
 
@@ -159,23 +269,172 @@ function toolNotes(msg: UIMessage): ToolNote[] {
             ]"
           >
             <span class="sr-only">{{ msg.role === "user" ? "You" : "Assistant" }}: </span>
-            <span class="whitespace-pre-wrap">{{ messageText(msg) }}</span>
+
+            <!-- User messages: plain text -->
+            <span v-if="msg.role === 'user'" class="whitespace-pre-wrap">
+              {{ messageText(msg) }}
+            </span>
+
+            <!-- Assistant messages: rich markdown -->
+            <MarkdownText v-else :content="messageText(msg)" />
           </div>
 
-          <!-- Tool notes (assistant only) -->
-          <ul
-            v-if="msg.role === 'assistant' && toolNotes(msg).length > 0"
-            class="flex flex-wrap gap-x-3 gap-y-0.5 px-1"
-            aria-label="Tool actions"
-          >
-            <li
-              v-for="note in toolNotes(msg)"
-              :key="note.key"
-              class="text-xs text-neutral-400 tabular-nums select-none"
+          <!-- Rich tool results (assistant only) -->
+          <template v-if="msg.role === 'assistant'">
+            <div
+              v-for="tp in extractToolParts(msg)"
+              :key="`${tp.toolName}-${tp.toolCallId}`"
+              class="w-full max-w-prose"
             >
-              {{ note.label }}
-            </li>
-          </ul>
+              <!-- Running state -->
+              <p
+                v-if="tp.state !== 'output-available'"
+                class="text-xs text-neutral-400 tabular-nums select-none px-1"
+              >
+                · running {{ tp.toolName }}…
+              </p>
+
+              <!-- web_search output -->
+              <template v-else-if="tp.toolName === 'web_search'">
+                <div
+                  v-if="!asWebSearch(tp.output).configured"
+                  class="text-xs text-neutral-400 px-1"
+                >
+                  {{ asWebSearch(tp.output).note ?? "Web search not configured." }}
+                </div>
+                <ul
+                  v-else-if="asWebSearch(tp.output).results.length > 0"
+                  class="space-y-1.5 mt-1"
+                >
+                  <li
+                    v-for="(r, i) in asWebSearch(tp.output).results"
+                    :key="i"
+                    class="border border-neutral-200 rounded px-3 py-2 bg-white"
+                  >
+                    <a
+                      :href="r.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="block group"
+                    >
+                      <div class="text-xs font-medium text-neutral-800 group-hover:underline leading-snug">
+                        {{ r.title }}
+                      </div>
+                      <div class="text-xs text-neutral-400 truncate mt-0.5">{{ r.url }}</div>
+                      <div class="text-xs text-neutral-600 mt-1 leading-relaxed">{{ r.snippet }}</div>
+                    </a>
+                  </li>
+                </ul>
+                <p v-else class="text-xs text-neutral-400 px-1">No web results found.</p>
+              </template>
+
+              <!-- search_documents output -->
+              <template v-else-if="tp.toolName === 'search_documents'">
+                <ul
+                  v-if="asSearchDocuments(tp.output).chunks.length > 0"
+                  class="space-y-1.5 mt-1"
+                >
+                  <li
+                    v-for="(c, i) in asSearchDocuments(tp.output).chunks"
+                    :key="i"
+                    class="border border-neutral-200 rounded px-3 py-2 bg-white"
+                  >
+                    <div class="text-xs text-neutral-400 mb-0.5">{{ c.filename }}</div>
+                    <div class="text-xs text-neutral-700 leading-relaxed line-clamp-3">{{ c.content }}</div>
+                  </li>
+                </ul>
+                <p v-else class="text-xs text-neutral-400 px-1">· no document chunks found</p>
+              </template>
+
+              <!-- search_memory output -->
+              <template v-else-if="tp.toolName === 'search_memory'">
+                <ul
+                  v-if="asSearchMemory(tp.output).memories.length > 0"
+                  class="mt-1 pl-4 space-y-0.5 list-disc"
+                >
+                  <li
+                    v-for="(m, i) in asSearchMemory(tp.output).memories"
+                    :key="i"
+                    class="text-xs text-neutral-600"
+                  >
+                    {{ m }}
+                  </li>
+                </ul>
+                <p v-else class="text-xs text-neutral-400 px-1">· no memories found</p>
+              </template>
+
+              <!-- create_todo output -->
+              <template v-else-if="tp.toolName === 'create_todo'">
+                <p class="text-xs text-neutral-500 px-1 tabular-nums">
+                  ✓ created todo: {{ asCreateTodo(tp.output).title }}
+                </p>
+              </template>
+
+              <!-- create_event output -->
+              <template v-else-if="tp.toolName === 'create_event'">
+                <p
+                  v-if="asCreateEvent(tp.output).error"
+                  class="text-xs text-neutral-500 px-1"
+                >
+                  · event not created: {{ asCreateEvent(tp.output).error }}
+                </p>
+                <p v-else class="text-xs text-neutral-500 px-1 tabular-nums">
+                  ✓ created event: {{ asCreateEvent(tp.output).title }}
+                </p>
+              </template>
+
+              <!-- read_calendar output -->
+              <template v-else-if="tp.toolName === 'read_calendar'">
+                <div class="border border-neutral-200 rounded px-3 py-2 bg-white mt-1">
+                  <div class="text-xs text-neutral-400 mb-1 tabular-nums">
+                    {{ asReadCalendar(tp.output).events.length }} event{{
+                      asReadCalendar(tp.output).events.length === 1 ? "" : "s"
+                    }},
+                    {{ asReadCalendar(tp.output).scheduledTodos.length }} scheduled todo{{
+                      asReadCalendar(tp.output).scheduledTodos.length === 1 ? "" : "s"
+                    }},
+                    {{ asReadCalendar(tp.output).unscheduledTodos.length }} unscheduled
+                  </div>
+                  <ul v-if="asReadCalendar(tp.output).events.length > 0" class="space-y-0.5">
+                    <li
+                      v-for="(ev, i) in asReadCalendar(tp.output).events"
+                      :key="i"
+                      class="text-xs text-neutral-700 tabular-nums flex gap-2"
+                    >
+                      <span class="text-neutral-400 shrink-0">
+                        {{ formatTime(ev.startsAt) }}
+                      </span>
+                      <span>{{ ev.title }}</span>
+                    </li>
+                  </ul>
+                  <ul
+                    v-if="asReadCalendar(tp.output).scheduledTodos.length > 0"
+                    class="mt-1 space-y-0.5"
+                  >
+                    <li
+                      v-for="(t, i) in asReadCalendar(tp.output).scheduledTodos"
+                      :key="i"
+                      class="text-xs text-neutral-500"
+                    >
+                      ☐ {{ t.title }}
+                    </li>
+                  </ul>
+                  <ul
+                    v-if="asReadCalendar(tp.output).unscheduledTodos.length > 0"
+                    class="mt-1 space-y-0.5"
+                  >
+                    <li
+                      v-for="(t, i) in asReadCalendar(tp.output).unscheduledTodos"
+                      :key="i"
+                      class="text-xs text-neutral-400"
+                    >
+                      ☐ {{ t.title }} <span class="italic">(unscheduled)</span>
+                    </li>
+                  </ul>
+                </div>
+              </template>
+            </div>
+          </template>
         </li>
 
         <!-- Streaming indicator -->
