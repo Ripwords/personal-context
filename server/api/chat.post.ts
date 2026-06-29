@@ -22,6 +22,7 @@ export default defineEventHandler(async (event) => {
   interface ChatRequest {
     messages?: UIMessage[];
     sessionId?: string;
+    timeZone?: string;
   }
 
   const body = await readBody<ChatRequest>(event);
@@ -55,9 +56,19 @@ export default defineEventHandler(async (event) => {
     listProjects(db),
   ]);
 
+  // Prefer the client's timezone so "today"/"tomorrow"/"2pm" resolve to the
+  // user's local day — the server (e.g. Vercel) runs in UTC.
   const now = new Date();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const datetime = now.toISOString();
+  const tz = body.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const datetime = now.toLocaleString("en-US", {
+    timeZone: tz,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
   const memoriesBlock =
     memories.length > 0
@@ -71,7 +82,7 @@ export default defineEventHandler(async (event) => {
 
   const system = [
     `You are a personal assistant integrated into the user's Braindump app.`,
-    `Current datetime: ${datetime} (${tz})`,
+    `Today is ${datetime} (${tz}). Resolve relative dates and times ("today", "tomorrow", "tonight", "2pm", "next Monday") against this.`,
     memoriesBlock,
     projectsBlock,
     `\nTool guidance:`,

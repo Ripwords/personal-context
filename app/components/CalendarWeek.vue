@@ -28,11 +28,11 @@ const props = defineProps<{
   projectColorMap: Record<string, string>;
 }>();
 
-const DEFAULT_EVENT_COLOR = "#525252"; // neutral-600 for events with no calendar color
+const DEFAULT_EVENT_COLOR = "#6b7280"; // neutral for events with no calendar color
 
-// Translucent fill from a hex color so the title stays readable on a light tint.
+// Translucent fill from a hex color — readable as a colored block on the dark grid.
 function tint(hex: string | null | undefined): string {
-  return `${hex ?? DEFAULT_EVENT_COLOR}22`;
+  return `${hex ?? DEFAULT_EVENT_COLOR}33`;
 }
 function solid(hex: string | null | undefined): string {
   return hex ?? DEFAULT_EVENT_COLOR;
@@ -130,44 +130,57 @@ onBeforeUnmount(() => {
 function isToday(d: Date): boolean {
   return dayMarkerKey(d) === localDayKey(today.value);
 }
+
+// Current-time red line (Notion-style), shown only when the visible week is the
+// one containing today.
+const weekHasToday = computed(() => props.days.some((d) => isToday(d)));
+const nowTop = computed(
+  () => ((today.value.getHours() * 60 + today.value.getMinutes()) / 60) * HOUR_HEIGHT_PX,
+);
+const nowLabel = computed(() =>
+  today.value.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+);
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-hidden">
+  <div class="flex flex-col h-full overflow-hidden bd-bg">
     <!-- Day header row -->
-    <div class="grid border-b border-neutral-200 bg-white" :style="{ gridTemplateColumns: `3rem repeat(${days.length}, 1fr)` }">
+    <div class="grid border-b bd-border bd-surface" :style="{ gridTemplateColumns: `3rem repeat(${days.length}, 1fr)` }">
       <!-- gutter -->
-      <div class="border-r border-neutral-200" />
+      <div class="border-r bd-border" />
       <div
         v-for="(day, i) in days"
         :key="day.toISOString()"
-        class="border-r border-neutral-200 px-2 py-2 text-center"
-        :class="isToday(day) ? 'text-neutral-900 font-semibold' : 'text-neutral-400'"
+        class="border-r bd-border px-2 py-2 text-center"
       >
-        <p class="text-[10px] uppercase tracking-widest">{{ DAY_LABELS[i] }}</p>
-        <p class="text-base tabular-nums leading-tight">{{ labelDate(day).split(" ")[1] }}</p>
+        <p class="text-[10px] uppercase tracking-widest" :class="isToday(day) ? 'bd-accent' : 'bd-faint'">{{ DAY_LABELS[i] }}</p>
+        <p
+          class="text-base tabular-nums leading-tight mt-0.5 inline-flex items-center justify-center min-w-7 h-7 rounded-full"
+          :class="isToday(day) ? 'text-white font-semibold' : 'bd-muted'"
+          :style="isToday(day) ? { backgroundColor: 'var(--bd-accent)' } : {}"
+        >{{ labelDate(day).split(" ")[1] }}</p>
       </div>
     </div>
 
     <!-- All-day row -->
     <div
       v-if="(allDayEvents?.length ?? 0) > 0"
-      class="grid border-b border-neutral-200 bg-white"
+      class="grid border-b bd-border bd-surface"
       :style="{ gridTemplateColumns: `3rem repeat(${days.length}, 1fr)` }"
     >
-      <div class="border-r border-neutral-200 flex items-center justify-end pr-2">
-        <span class="text-[9px] uppercase tracking-widest text-neutral-300">All day</span>
+      <div class="border-r bd-border flex items-center justify-end pr-2">
+        <span class="text-[9px] uppercase tracking-widest bd-faint">All day</span>
       </div>
       <div
         v-for="(day, colIdx) in days"
         :key="day.toISOString()"
-        class="border-r border-neutral-200 px-1 py-1 flex flex-col gap-0.5 min-h-[1.75rem]"
+        class="border-r bd-border px-1 py-1 flex flex-col gap-0.5 min-h-[1.75rem]"
       >
         <div
           v-for="ev in allDayByDay[colIdx]"
           :key="ev.id"
-          class="rounded px-1.5 py-0.5 text-[10px] leading-tight truncate border-l-2"
-          :style="{ backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color), color: '#404040' }"
+          class="rounded px-1.5 py-0.5 text-[10px] leading-tight truncate border-l-2 bd-text"
+          :style="{ backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color) }"
           :title="ev.title"
         >
           {{ ev.title }}
@@ -185,14 +198,14 @@ function isToday(d: Date): boolean {
         }"
       >
         <!-- Hour labels column -->
-        <div class="relative border-r border-neutral-200">
+        <div class="relative border-r bd-border">
           <div
             v-for="h in HOURS"
             :key="h"
-            class="absolute w-full border-t border-neutral-100"
+            class="absolute w-full border-t bd-border opacity-60"
             :style="{ top: `${h * HOUR_HEIGHT_PX}px` }"
           >
-            <span class="block text-right pr-2 text-[10px] tabular-nums text-neutral-300 -mt-2.5">
+            <span class="block text-right pr-2 text-[10px] tabular-nums bd-faint -mt-2.5">
               {{ h === 0 ? "" : formatHour(h) }}
             </span>
           </div>
@@ -202,20 +215,21 @@ function isToday(d: Date): boolean {
         <div
           v-for="(day, colIdx) in days"
           :key="day.toISOString()"
-          class="relative border-r border-neutral-200"
+          class="relative border-r bd-border"
         >
           <!-- Hour grid lines -->
           <div
             v-for="h in HOURS"
             :key="h"
-            class="absolute w-full border-t border-neutral-100"
+            class="absolute w-full border-t bd-border opacity-60"
             :style="{ top: `${h * HOUR_HEIGHT_PX}px`, height: `${HOUR_HEIGHT_PX}px` }"
           />
 
-          <!-- Today highlight -->
+          <!-- Today column tint -->
           <div
             v-if="isToday(day)"
-            class="absolute inset-0 bg-neutral-50 pointer-events-none"
+            class="absolute inset-0 pointer-events-none"
+            style="background-color: rgba(255,255,255,0.025)"
           />
 
           <!-- Events -->
@@ -225,10 +239,10 @@ function isToday(d: Date): boolean {
             class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border-l-2"
             :style="{ ...blockStyle(ev._start, ev._end), backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color) }"
           >
-            <p class="text-[11px] leading-tight truncate pl-1.5 pt-0.5 text-neutral-800">
+            <p class="text-[11px] leading-tight truncate pl-1.5 pt-0.5 bd-text">
               {{ ev.title }}
             </p>
-            <p class="text-[10px] tabular-nums text-neutral-500 pl-1.5">
+            <p class="text-[10px] tabular-nums bd-muted pl-1.5">
               {{ ev._start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) }}
             </p>
           </div>
@@ -237,7 +251,7 @@ function isToday(d: Date): boolean {
           <div
             v-for="todo in todosByDay[colIdx]"
             :key="todo.id"
-            class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border border-neutral-200 bg-neutral-50"
+            class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border border-dashed bd-border bd-surface-2"
             :style="blockStyle(todo._start, todo._end)"
           >
             <div
@@ -245,9 +259,27 @@ function isToday(d: Date): boolean {
               class="absolute left-0 top-0 bottom-0 w-0.5"
               :style="{ backgroundColor: projectColorMap[todo.projectId] }"
             />
-            <p class="text-[11px] leading-tight truncate pl-1.5 pt-0.5 text-neutral-600">
+            <p class="text-[11px] leading-tight truncate pl-1.5 pt-0.5 bd-muted">
               {{ todo.title }}
             </p>
+          </div>
+        </div>
+
+        <!-- Current-time red line -->
+        <div
+          v-if="weekHasToday"
+          class="absolute left-0 right-0 z-10 flex items-center pointer-events-none"
+          :style="{ top: `${nowTop}px` }"
+        >
+          <div class="w-12 shrink-0 flex justify-end pr-1">
+            <span
+              class="text-[10px] tabular-nums font-semibold text-white rounded px-1 leading-tight"
+              style="background-color: var(--bd-accent)"
+            >{{ nowLabel }}</span>
+          </div>
+          <div class="relative flex-1">
+            <div class="h-px w-full" style="background-color: var(--bd-accent)" />
+            <div class="absolute -left-0.5 -top-1 w-2 h-2 rounded-full" style="background-color: var(--bd-accent)" />
           </div>
         </div>
       </div>

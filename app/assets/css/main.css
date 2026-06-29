@@ -1,2 +1,49 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/* ── Braindump Dark theme (Notion Calendar grey) ───────────────────────────
+   Single dark theme — no light mode. Tokens consumed by components via the
+   bd-* utility classes and arbitrary values. */
+:root {
+  color-scheme: dark;
+  --bd-bg: #191919;        /* app canvas / calendar grid */
+  --bd-surface: #202020;   /* rails, header, cards */
+  --bd-surface-2: #2a2a2a; /* hover / raised */
+  --bd-border: #2c2c2c;    /* hairline gridlines */
+  --bd-text: #e4e4e7;      /* primary text */
+  --bd-muted: #a1a1aa;     /* secondary text */
+  --bd-faint: #71717a;     /* labels / disabled */
+  --bd-accent: #e5484d;    /* today + now-line, used sparingly */
+}
+
+html,
+body,
+#__nuxt {
+  background-color: var(--bd-bg);
+  color: var(--bd-text);
+}
+
+/* Reusable surface/border/text helpers so components stay consistent. */
+.bd-bg { background-color: var(--bd-bg); }
+.bd-surface { background-color: var(--bd-surface); }
+.bd-surface-2 { background-color: var(--bd-surface-2); }
+.bd-border { border-color: var(--bd-border); }
+.bd-text { color: var(--bd-text); }
+.bd-muted { color: var(--bd-muted); }
+.bd-faint { color: var(--bd-faint); }
+.bd-accent { color: var(--bd-accent); }
+
+/* Hover affordance for low-chrome rows/buttons. */
+.bd-hover:hover { background-color: var(--bd-surface-2); }
+
+/* Dark scrollbars to match the canvas. */
+* {
+  scrollbar-color: var(--bd-surface-2) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--bd-surface-2);
+  border-radius: 8px;
+  border: 2px solid var(--bd-bg);
+}
+::-webkit-scrollbar-track { background: transparent; }

@@ -164,7 +164,10 @@ const currentSessionId = ref<string | null>(null);
 const { messages, sendMessage, status, error } = useChat({
   transport: new DefaultChatTransport({
     api: "/api/chat",
-    body: () => ({ sessionId: currentSessionId.value ?? undefined }),
+    body: () => ({
+      sessionId: currentSessionId.value ?? undefined,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
   }),
 });
 
