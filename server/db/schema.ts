@@ -136,6 +136,29 @@ export type NewActivity = typeof activities.$inferInsert;
 export type Memory = typeof memory.$inferSelect;
 export type NewMemory = typeof memory.$inferInsert;
 
+// ── Chat tables ────────────────────────────────────────────────────────────
+
+export const chatSession = pgTable("chat_session", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull().default("New chat"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const chatMessage = pgTable("chat_message", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id").notNull().references(() => chatSession.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // 'user' | 'assistant'
+  content: text("content").notNull(),
+  parts: jsonb("parts"), // nullable — stores tool parts / structured parts
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ChatSession = typeof chatSession.$inferSelect;
+export type NewChatSession = typeof chatSession.$inferInsert;
+export type ChatMessage = typeof chatMessage.$inferSelect;
+export type NewChatMessage = typeof chatMessage.$inferInsert;
+
 // ── Better Auth tables ─────────────────────────────────────────────────────
 
 export const user = pgTable("user", {
