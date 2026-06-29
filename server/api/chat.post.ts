@@ -1,4 +1,4 @@
-import { defineEventHandler, createError, readBody } from "h3";
+import { defineEventHandler, createError, readBody, setResponseHeader } from "h3";
 import {
   streamText,
   convertToModelMessages,
@@ -13,6 +13,7 @@ import { makeModel } from "../ai/model";
 import { makeChatTools } from "../ai/chat-tools";
 import { searchMemories } from "../db/queries/memory";
 import { listProjects } from "../db/queries/projects";
+import { createChatSession, addChatMessage } from "../db/queries/chats";
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -20,6 +21,7 @@ export default defineEventHandler(async (event) => {
 
   interface ChatRequest {
     messages?: UIMessage[];
+    sessionId?: string;
   }
 
   const body = await readBody<ChatRequest>(event);
@@ -27,14 +29,26 @@ export default defineEventHandler(async (event) => {
 
   const db = getDb();
 
+  const sessionId = body.sessionId ?? (await createChatSession(db)).id;
+  setResponseHeader(event, "x-chat-session-id", sessionId);
+
   // Memory recall: find latest user message text for FTS search
-  const latestUserText = [...messages]
+  const latestUserMsg = [...messages]
     .reverse()
-    .find((m) => m.role === "user")
-    ?.parts
+    .find((m) => m.role === "user");
+
+  const latestUserText = latestUserMsg?.parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)
     .join(" ") ?? "";
+
+  if (latestUserMsg) {
+    await addChatMessage(db, {
+      sessionId,
+      role: "user",
+      content: latestUserText,
+    });
+  }
 
   const [memories, projects] = await Promise.all([
     latestUserText ? searchMemories(db, latestUserText, 5) : Promise.resolve([]),
@@ -77,6 +91,14 @@ export default defineEventHandler(async (event) => {
     messages: modelMessages,
     tools: makeChatTools(db),
     stopWhen: stepCountIs(8),
+    onFinish: async ({ text }) => {
+      await addChatMessage(db, {
+        sessionId,
+        role: "assistant",
+        content: text,
+        parts: undefined,
+      });
+    },
   });
 
   return createUIMessageStreamResponse({
