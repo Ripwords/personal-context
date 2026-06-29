@@ -1,82 +1,32 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { startOfWeek, weekDays, addDays } from "~/composables/useWeek";
 import type { Project } from "~/components/ProjectRail.vue";
+import type CalendarTimeline from "~/components/CalendarTimeline.vue";
+import { useCalendarFeed } from "~/composables/useCalendarFeed";
 import { authClient } from "~/lib/auth-client";
 
-// ── Week navigation state ─────────────────────────────────────────────────
+// ── Calendar: lazily-loaded feed feeding the smooth-scrolling timeline ─────
+// The timeline emits the weeks scrolling into view; the feed fetches each one
+// on demand, so panning loads (and syncs) new territory just in time.
+const timeline = ref<InstanceType<typeof CalendarTimeline> | null>(null);
+const centerDate = ref<Date>(new Date());
 
-// useWeek operates on UTC-midnight date markers. Seed it from the viewer's LOCAL
-// calendar date (not the raw instant) so "this week" is the local week even when
-// UTC has already rolled over to the next day.
-function localTodayMarker(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-}
-
-const anchor = ref<Date>(startOfWeek(localTodayMarker()));
-
-function goToToday(): void {
-  anchor.value = startOfWeek(localTodayMarker());
-}
-
-function prevWeek(): void {
-  anchor.value = addDays(anchor.value, -7);
-}
-
-function nextWeek(): void {
-  anchor.value = addDays(anchor.value, 7);
-}
-
-const days = computed(() => weekDays(anchor.value));
-
-// Pad the fetch window by a day on each side: the visible week is a set of LOCAL
-// days, which can extend up to ~14h beyond the UTC-marker boundaries. The grid
-// buckets events into the 7 local columns, so over-fetching adjacent days is safe.
-const fromISO = computed(() => addDays(days.value[0], -1).toISOString());
-const toISO = computed(() => addDays(days.value[6], 2).toISOString());
+const {
+  events: feedEvents,
+  allDayEvents: feedAllDay,
+  scheduledTodos: feedScheduledTodos,
+  unscheduledTodos: feedUnscheduled,
+  loading,
+  hasAny,
+  lastError,
+  ensureWeeks,
+  reload,
+} = useCalendarFeed();
 
 // ── View toggle ───────────────────────────────────────────────────────────
 
 type ViewMode = "day" | "week" | "month";
 const viewMode = ref<ViewMode>("week");
-
-// ── Calendar data via useFetch ────────────────────────────────────────────
-
-interface CalEvent {
-  id: string;
-  title: string;
-  startsAt: string;
-  endsAt: string;
-  projectId: string | null;
-  color: string | null;
-  allDay: boolean;
-}
-
-interface CalTodo {
-  id: string;
-  title: string;
-  notes: string | null;
-  projectId: string | null;
-  scheduledStart: string | null;
-  scheduledEnd: string | null;
-}
-
-interface CalendarFeed {
-  events: CalEvent[];
-  allDayEvents: CalEvent[];
-  scheduledTodos: CalTodo[];
-  unscheduledTodos: CalTodo[];
-}
-
-const {
-  data: feed,
-  status,
-  error,
-  refresh,
-} = await useFetch<CalendarFeed>("/api/calendar/events", {
-  query: computed(() => ({ from: fromISO.value, to: toISO.value })),
-});
 
 // ── Projects ──────────────────────────────────────────────────────────────
 
@@ -104,34 +54,36 @@ const projectColorMap = computed<Record<string, string>>(() => {
 // ── Filtered feed ─────────────────────────────────────────────────────────
 
 const events = computed(() => {
-  const raw = feed.value?.events ?? [];
-  if (activeProjectIds.value.size === 0) return raw;
-  return raw.filter((e) => e.projectId != null && activeProjectIds.value.has(e.projectId));
+  if (activeProjectIds.value.size === 0) return feedEvents.value;
+  return feedEvents.value.filter(
+    (e) => e.projectId != null && activeProjectIds.value.has(e.projectId),
+  );
 });
 
 const scheduledTodos = computed(() => {
-  const raw = feed.value?.scheduledTodos ?? [];
-  if (activeProjectIds.value.size === 0) return raw;
-  return raw.filter((t) => t.projectId != null && activeProjectIds.value.has(t.projectId));
+  if (activeProjectIds.value.size === 0) return feedScheduledTodos.value;
+  return feedScheduledTodos.value.filter(
+    (t) => t.projectId != null && activeProjectIds.value.has(t.projectId),
+  );
 });
 
-const allDayEvents = computed(() => feed.value?.allDayEvents ?? []);
-const unscheduledTodos = computed(() => feed.value?.unscheduledTodos ?? []);
+const allDayEvents = computed(() => feedAllDay.value);
+const unscheduledTodos = computed(() => feedUnscheduled.value);
 
 async function dropTodo(id: string): Promise<void> {
   await $fetch(`/api/todos/${id}`, { method: "DELETE" });
-  await refresh();
+  await reload();
 }
 
 async function clearUnscheduled(): Promise<void> {
   await $fetch("/api/todos/clear-unscheduled", { method: "POST" });
-  await refresh();
+  await reload();
 }
 
 // ── Brain dump quick capture (primary action) ──────────────────────────────
 
 interface CreatedItem { kind: "todo" | "event"; title: string }
-interface DumpResult { created: CreatedItem[]; memoriesSaved: number }
+interface DumpResult { created: CreatedItem[]; memoriesSaved: number; writtenToGoogle?: number; needsReauth?: boolean }
 
 const toast = useToast();
 const dumpText = ref<string>("");
@@ -147,7 +99,7 @@ async function submitDump(): Promise<void> {
       body: { text, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     });
     dumpText.value = "";
-    await refresh();
+    await reload();
     const todos = res.created.filter((c) => c.kind === "todo").length;
     const events = res.created.filter((c) => c.kind === "event").length;
     const parts: string[] = [];
@@ -159,6 +111,17 @@ async function submitDump(): Promise<void> {
       description: res.created.map((c) => c.title).slice(0, 3).join(" · ") || undefined,
       color: "neutral",
     });
+    // Write-back to Google needs the calendar permission — prompt a re-sign-in.
+    if (res.needsReauth) {
+      toast.add({
+        title: "Saved locally — not synced to Google",
+        description: "Sign in again to grant calendar access, then it'll appear in Google/Notion.",
+        color: "warning",
+        actions: [{ label: "Sign in again", onClick: () => handleSignOut() }],
+      });
+    } else if (res.writtenToGoogle) {
+      toast.add({ title: `Synced ${res.writtenToGoogle} to Google`, color: "success" });
+    }
   } catch {
     toast.add({ title: "Couldn't capture that", description: "Try again in a moment.", color: "error" });
   } finally {
@@ -184,12 +147,12 @@ async function handleSignOut(): Promise<void> {
 }
 
 const monthTitle = computed(() =>
-  days.value[3].toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
+  centerDate.value.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
 );
 </script>
 
 <template>
-  <div class="min-h-dvh bd-bg bd-text flex flex-col">
+  <div class="h-dvh overflow-hidden bd-bg bd-text flex flex-col">
     <!-- ── Top bar ─────────────────────────────────────────────────────────── -->
     <header class="flex items-center gap-4 px-4 h-14 border-b bd-border bd-surface shrink-0">
       <!-- Month title -->
@@ -200,17 +163,17 @@ const monthTitle = computed(() =>
       <!-- Week nav -->
       <div class="flex items-center gap-0.5">
         <button
-          type="button" aria-label="Previous week" @click="prevWeek"
+          type="button" aria-label="Previous week" @click="timeline?.prev()"
           class="w-7 h-7 flex items-center justify-center rounded bd-muted bd-hover motion-safe:transition-colors
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
         >‹</button>
         <button
-          type="button" @click="goToToday"
+          type="button" @click="timeline?.goToToday()"
           class="px-2.5 h-7 rounded text-xs font-medium bd-muted bd-hover motion-safe:transition-colors
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
         >Today</button>
         <button
-          type="button" aria-label="Next week" @click="nextWeek"
+          type="button" aria-label="Next week" @click="timeline?.next()"
           class="w-7 h-7 flex items-center justify-center rounded bd-muted bd-hover motion-safe:transition-colors
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
         >›</button>
@@ -278,7 +241,7 @@ const monthTitle = computed(() =>
     <div class="flex flex-1 overflow-hidden">
       <!-- Left rail: calendars + projects -->
       <aside class="w-48 shrink-0 border-r bd-border bd-surface overflow-y-auto flex flex-col">
-        <CalendarRail @changed="refresh" />
+        <CalendarRail @changed="reload" />
         <ProjectRail
           :projects="projects"
           :active-ids="activeProjectIds"
@@ -289,21 +252,33 @@ const monthTitle = computed(() =>
       <!-- Center: calendar -->
       <main class="flex-1 overflow-hidden flex flex-col bd-bg">
         <template v-if="viewMode === 'week'">
-          <div v-if="status === 'pending'" class="flex-1 flex items-center justify-center text-sm bd-faint">
-            Loading…
+          <div class="relative flex-1 overflow-hidden">
+            <!-- Smooth-scrolling, lazily-loaded horizontal timeline -->
+            <CalendarTimeline
+              ref="timeline"
+              class="h-full"
+              :events="events"
+              :all-day-events="allDayEvents"
+              :scheduled-todos="scheduledTodos"
+              :project-color-map="projectColorMap"
+              @visible-weeks="ensureWeeks"
+              @update:center-date="centerDate = $event"
+            />
+
+            <!-- First-load / error overlays (kept off the grid so it never unmounts mid-scroll) -->
+            <div
+              v-if="loading && !hasAny"
+              class="absolute inset-0 flex items-center justify-center text-sm bd-faint bd-bg pointer-events-none"
+            >
+              Loading…
+            </div>
+            <div
+              v-else-if="lastError && !hasAny"
+              class="absolute inset-0 flex items-center justify-center text-sm bd-faint bd-bg"
+            >
+              {{ lastError.statusCode === 401 ? 'Sign in to view your calendar.' : 'Failed to load events.' }}
+            </div>
           </div>
-          <div v-else-if="error" class="flex-1 flex items-center justify-center text-sm bd-faint">
-            {{ error.statusCode === 401 ? 'Sign in to view your calendar.' : 'Failed to load events.' }}
-          </div>
-          <CalendarWeek
-            v-else
-            class="flex-1 overflow-hidden"
-            :days="days"
-            :events="events"
-            :all-day-events="allDayEvents"
-            :scheduled-todos="scheduledTodos"
-            :project-color-map="projectColorMap"
-          />
         </template>
 
         <template v-else-if="viewMode === 'day'">
