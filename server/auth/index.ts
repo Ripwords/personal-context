@@ -25,6 +25,12 @@ export const auth = betterAuth({
     },
   },
   account: {
-    accountLinking: { enabled: true, trustedProviders: ["google"] },
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ["google"],
+      // Personal + work Google accounts have different emails by design,
+      // so linking must not require the emails to match.
+      allowDifferentEmails: true,
+    },
   },
 });
