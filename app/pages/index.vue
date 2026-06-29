@@ -42,6 +42,8 @@ interface CalEvent {
   startsAt: string;
   endsAt: string;
   projectId: string | null;
+  color: string | null;
+  allDay: boolean;
 }
 
 interface CalTodo {
@@ -55,6 +57,7 @@ interface CalTodo {
 
 interface CalendarFeed {
   events: CalEvent[];
+  allDayEvents: CalEvent[];
   scheduledTodos: CalTodo[];
   unscheduledTodos: CalTodo[];
 }
@@ -114,6 +117,8 @@ const scheduledTodos = computed(() => {
   if (activeProjectIds.value.size === 0) return raw;
   return raw.filter((t) => t.projectId != null && activeProjectIds.value.has(t.projectId));
 });
+
+const allDayEvents = computed(() => feed.value?.allDayEvents ?? []);
 
 const unscheduledTodos = computed(() => feed.value?.unscheduledTodos ?? []);
 
@@ -308,6 +313,7 @@ const weekLabel = computed(() => {
             class="flex-1 overflow-hidden"
             :days="days"
             :events="events"
+            :all-day-events="allDayEvents"
             :scheduled-todos="scheduledTodos"
             :project-color-map="projectColorMap"
           />

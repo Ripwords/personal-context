@@ -7,6 +7,9 @@ export interface CalEvent {
   startsAt: string | Date;
   endsAt: string | Date;
   projectId: string | null;
+  /** Source Google calendar color (hex), or null for local/AI events. */
+  color?: string | null;
+  allDay?: boolean;
 }
 
 export interface CalTodo {
@@ -20,9 +23,20 @@ export interface CalTodo {
 const props = defineProps<{
   days: Date[];
   events: CalEvent[];
+  allDayEvents?: CalEvent[];
   scheduledTodos: CalTodo[];
   projectColorMap: Record<string, string>;
 }>();
+
+const DEFAULT_EVENT_COLOR = "#525252"; // neutral-600 for events with no calendar color
+
+// Translucent fill from a hex color so the title stays readable on a light tint.
+function tint(hex: string | null | undefined): string {
+  return `${hex ?? DEFAULT_EVENT_COLOR}22`;
+}
+function solid(hex: string | null | undefined): string {
+  return hex ?? DEFAULT_EVENT_COLOR;
+}
 
 const HOUR_HEIGHT_PX = 48; // px per hour
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -64,6 +78,14 @@ const eventsByDay = computed(() =>
   props.days.map((day) =>
     props.events
       .map((e) => ({ ...e, _start: new Date(e.startsAt), _end: new Date(e.endsAt) }))
+      .filter((e) => isSameDay(e._start, day)),
+  ),
+);
+
+const allDayByDay = computed(() =>
+  props.days.map((day) =>
+    (props.allDayEvents ?? [])
+      .map((e) => ({ ...e, _start: new Date(e.startsAt) }))
       .filter((e) => isSameDay(e._start, day)),
   ),
 );
@@ -120,6 +142,32 @@ function isToday(d: Date): boolean {
       </div>
     </div>
 
+    <!-- All-day row -->
+    <div
+      v-if="(allDayEvents?.length ?? 0) > 0"
+      class="grid border-b border-neutral-200 bg-white"
+      :style="{ gridTemplateColumns: `3rem repeat(${days.length}, 1fr)` }"
+    >
+      <div class="border-r border-neutral-200 flex items-center justify-end pr-2">
+        <span class="text-[9px] uppercase tracking-widest text-neutral-300">All day</span>
+      </div>
+      <div
+        v-for="(day, colIdx) in days"
+        :key="day.toISOString()"
+        class="border-r border-neutral-200 px-1 py-1 flex flex-col gap-0.5 min-h-[1.75rem]"
+      >
+        <div
+          v-for="ev in allDayByDay[colIdx]"
+          :key="ev.id"
+          class="rounded px-1.5 py-0.5 text-[10px] leading-tight truncate border-l-2"
+          :style="{ backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color), color: '#404040' }"
+          :title="ev.title"
+        >
+          {{ ev.title }}
+        </div>
+      </div>
+    </div>
+
     <!-- Scrollable time grid -->
     <div class="flex-1 overflow-y-auto">
       <div
@@ -167,18 +215,13 @@ function isToday(d: Date): boolean {
           <div
             v-for="ev in eventsByDay[colIdx]"
             :key="ev.id"
-            class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border border-neutral-200 bg-white"
-            :style="blockStyle(ev._start, ev._end)"
+            class="absolute left-0.5 right-0.5 rounded px-1.5 overflow-hidden border-l-2"
+            :style="{ ...blockStyle(ev._start, ev._end), backgroundColor: tint(ev.color), borderLeftColor: solid(ev.color) }"
           >
-            <div
-              v-if="ev.projectId && projectColorMap[ev.projectId]"
-              class="absolute left-0 top-0 bottom-0 w-0.5"
-              :style="{ backgroundColor: projectColorMap[ev.projectId] }"
-            />
             <p class="text-[11px] leading-tight truncate pl-1.5 pt-0.5 text-neutral-800">
               {{ ev.title }}
             </p>
-            <p class="text-[10px] tabular-nums text-neutral-400 pl-1.5">
+            <p class="text-[10px] tabular-nums text-neutral-500 pl-1.5">
               {{ ev._start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }) }}
             </p>
           </div>
