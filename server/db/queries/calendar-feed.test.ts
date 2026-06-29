@@ -2,6 +2,7 @@ import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../test-helpers";
 import { createTodo, createEvent } from "./items";
 import { getCalendarFeed } from "./calendar-feed";
+import { googleCalendar, events as eventsTable } from "../schema";
 
 const db = getTestDb();
 beforeEach(async () => { await truncateAll(db); });
@@ -16,4 +17,26 @@ test("aggregates events, scheduled todos in range, and unscheduled todos", async
   expect(feed.events.map((e) => e.title)).toEqual(["ev"]);
   expect(feed.scheduledTodos.map((t) => t.title)).toEqual(["sched"]);
   expect(feed.unscheduledTodos.map((t) => t.title)).toEqual(["unsched"]);
+});
+
+test("splits all-day events, attaches calendar color, and hides deselected calendars", async () => {
+  await db.insert(googleCalendar).values([
+    { accountId: "acc1", calendarId: "primary", summary: "Me", backgroundColor: "#4986e7", selected: true },
+    { accountId: "acc1", calendarId: "bdays", summary: "Birthdays", backgroundColor: "#16a765", selected: true },
+    { accountId: "acc1", calendarId: "muted", summary: "Muted", backgroundColor: "#999999", selected: false },
+  ]);
+  await db.insert(eventsTable).values([
+    { title: "timed", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+      googleAccountId: "acc1", calendarId: "primary", googleEventId: "t1", allDay: false },
+    { title: "bday", startsAt: new Date("2026-07-01T00:00:00Z"), endsAt: new Date("2026-07-02T00:00:00Z"),
+      googleAccountId: "acc1", calendarId: "bdays", googleEventId: "b1", allDay: true },
+    { title: "hidden", startsAt: new Date("2026-07-01T08:00:00Z"), endsAt: new Date("2026-07-01T09:00:00Z"),
+      googleAccountId: "acc1", calendarId: "muted", googleEventId: "h1", allDay: false },
+  ]);
+
+  const feed = await getCalendarFeed(db, new Date("2026-07-01T00:00:00Z"), new Date("2026-07-02T00:00:00Z"));
+  expect(feed.events.map((e) => e.title)).toEqual(["timed"]); // 'hidden' filtered out
+  expect(feed.events[0]!.color).toBe("#4986e7");
+  expect(feed.allDayEvents.map((e) => e.title)).toEqual(["bday"]);
+  expect(feed.allDayEvents[0]!.color).toBe("#16a765");
 });

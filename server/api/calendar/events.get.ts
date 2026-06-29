@@ -3,8 +3,8 @@ import { getDb } from "../../db/client";
 import { getAuthSession } from "../../utils/session";
 import { getGoogleConnections } from "../../auth/google-credentials";
 import { getFreshAccessToken } from "../../calendar-sync/access-token";
-import { syncConnectionEvents } from "../../calendar-sync/sync-events";
-import { makeGoogleTokenRefresher, makeGoogleEventsApi } from "../../calendar-sync/google-rest";
+import { syncAllCalendars } from "../../calendar-sync/sync-events";
+import { makeGoogleTokenRefresher, makeGoogleEventsApi, makeGoogleCalendarListApi } from "../../calendar-sync/google-rest";
 import { getCalendarFeed } from "../../db/queries/calendar-feed";
 
 export default defineEventHandler(async (event) => {
@@ -24,11 +24,12 @@ export default defineEventHandler(async (event) => {
     process.env.GOOGLE_CLIENT_SECRET ?? "",
   );
   const api = makeGoogleEventsApi();
+  const calListApi = makeGoogleCalendarListApi();
 
   for (const conn of await getGoogleConnections(db)) {
     try {
       const accessToken = await getFreshAccessToken(conn, Date.now(), refresh);
-      await syncConnectionEvents(db, conn, accessToken, api, from, to);
+      await syncAllCalendars(db, conn, accessToken, calListApi, api, from, to);
     } catch (err) {
       // One bad account shouldn't blank the whole calendar; log and continue.
       console.error(`sync failed for account ${conn.accountId}:`, err);
