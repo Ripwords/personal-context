@@ -1,5 +1,4 @@
 // server/auth/connections.ts
-import { eq } from "drizzle-orm";
 import { type Db } from "../db/client";
 import { googleConnections, type GoogleConnection } from "../db/schema";
 
@@ -21,13 +20,17 @@ export async function setBraindumpCalendarId(
   accountId: string,
   calendarId: string,
 ): Promise<GoogleConnection> {
+  // Upsert: an account may not have a google_connections row yet (role defaults
+  // to "personal" via LEFT JOIN), so insert one rather than failing the update.
   const [row] = await db
-    .update(googleConnections)
-    .set({ braindumpCalendarId: calendarId })
-    .where(eq(googleConnections.accountId, accountId))
+    .insert(googleConnections)
+    .values({ accountId, role: "personal", braindumpCalendarId: calendarId })
+    .onConflictDoUpdate({
+      target: googleConnections.accountId,
+      set: { braindumpCalendarId: calendarId },
+    })
     .returning();
-  if (!row) throw new Error(`No google_connections row for accountId ${accountId}`);
-  return row;
+  return row!;
 }
 
 export async function listConnections(db: Db): Promise<GoogleConnection[]> {

@@ -47,6 +47,60 @@ export type UserInfoApi = {
   email(input: { accessToken: string }): Promise<string | null>;
 };
 
+// ── Write APIs (calendar provisioning + event creation) ─────────────────────
+
+/** Create the "Braindump" calendar. Bound to an account's access token. */
+export function makeGoogleCalendarApi(accessToken: string, fetchImpl: typeof fetch = fetch) {
+  return {
+    async insert({ summary }: { summary: string }): Promise<{ id: string }> {
+      const res = await fetchImpl("https://www.googleapis.com/calendar/v3/calendars", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ summary }),
+      });
+      if (!res.ok) throw new Error(`create calendar failed: ${res.status}`);
+      const json = (await res.json()) as { id: string };
+      return { id: json.id };
+    },
+  };
+}
+
+export type EventWriteApi = {
+  insert(input: {
+    calendarId: string;
+    summary: string;
+    startsAt: Date;
+    endsAt: Date;
+    timeZone?: string;
+  }): Promise<{ id: string }>;
+};
+
+export function makeGoogleEventWriteApi(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): EventWriteApi {
+  return {
+    async insert({ calendarId, summary, startsAt, endsAt, timeZone }) {
+      const body = {
+        summary,
+        start: { dateTime: startsAt.toISOString(), ...(timeZone ? { timeZone } : {}) },
+        end: { dateTime: endsAt.toISOString(), ...(timeZone ? { timeZone } : {}) },
+      };
+      const res = await fetchImpl(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!res.ok) throw new Error(`create event failed: ${res.status}`);
+      const json = (await res.json()) as { id: string };
+      return { id: json.id };
+    },
+  };
+}
+
 export function makeGoogleUserInfoApi(fetchImpl: typeof fetch = fetch): UserInfoApi {
   return {
     async email({ accessToken }) {

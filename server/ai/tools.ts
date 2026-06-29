@@ -7,6 +7,16 @@ export const todoToolSchema = z.object({
   title: z.string().describe("Short, actionable title for the todo item"),
   notes: z.string().optional().describe("Optional extra details or context"),
   project: z.string().optional().describe("Project name (exact match preferred) or omit if none fits"),
+  scheduledStart: z
+    .string()
+    .datetime()
+    .optional()
+    .describe("ISO 8601 datetime if the todo has a specific time (e.g. 'remind me at 2pm'); omit for anytime todos"),
+  scheduledEnd: z
+    .string()
+    .datetime()
+    .optional()
+    .describe("ISO 8601 end datetime; defaults to 30 min after scheduledStart if omitted"),
   confidence: z.number().min(0).max(1).describe("Confidence 0..1 that this is a real actionable todo"),
 });
 

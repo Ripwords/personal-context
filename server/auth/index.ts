@@ -17,8 +17,10 @@ export const auth = betterAuth({
         "openid",
         "email",
         "profile",
-        "https://www.googleapis.com/auth/calendar.events",
-        "https://www.googleapis.com/auth/calendar.readonly",
+        // Full calendar scope: read events/calendarList AND create the dedicated
+        // "Braindump" calendar + write AI events back. (calendar.events alone
+        // cannot create a calendar — returns 403.)
+        "https://www.googleapis.com/auth/calendar",
       ],
       accessType: "offline",
       prompt: "consent",

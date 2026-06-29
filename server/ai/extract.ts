@@ -43,10 +43,25 @@ export async function createTodoFromInput(
   const projectId = resolveProject(inp.project, projects);
   const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
 
+  // A todo with a specific time (e.g. "remind me at 2pm") gets scheduled so it
+  // lands on the calendar grid (and can be mirrored to Google).
+  let scheduledStart: Date | undefined;
+  let scheduledEnd: Date | undefined;
+  if (inp.scheduledStart) {
+    const s = new Date(inp.scheduledStart);
+    if (!Number.isNaN(s.getTime())) {
+      scheduledStart = s;
+      const e = inp.scheduledEnd ? new Date(inp.scheduledEnd) : null;
+      scheduledEnd = e && !Number.isNaN(e.getTime()) ? e : new Date(s.getTime() + 30 * 60_000);
+    }
+  }
+
   const todo = await createTodo(db, {
     title: inp.title,
     notes: inp.notes ?? null,
     projectId,
+    scheduledStart,
+    scheduledEnd,
     source: "ai",
     confidence: inp.confidence ?? null,
     dumpId: dumpId ?? undefined,

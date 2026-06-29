@@ -157,6 +157,9 @@ export async function syncAllCalendars(
   let total = 0;
   for (const cal of calendars) {
     if (!visibleIds.has(cal.id)) continue;
+    // The Braindump calendar is write-only from the app's side — the AI items it
+    // holds already live locally, so reading them back would double them up.
+    if (conn.braindumpCalendarId && cal.id === conn.braindumpCalendarId) continue;
     total += await syncConnectionEvents(db, conn, accessToken, eventsApi, from, to, cal.id);
   }
   return total;

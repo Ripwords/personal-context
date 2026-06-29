@@ -4,6 +4,10 @@ import { getAuthSession } from "../utils/session";
 import { makeModel } from "../ai/model";
 import { extractFromDump } from "../ai/extract";
 import { extractMemories } from "../ai/memory-extract";
+import { getGoogleConnections } from "../auth/google-credentials";
+import { getFreshAccessToken } from "../calendar-sync/access-token";
+import { makeGoogleTokenRefresher, makeGoogleCalendarApi, makeGoogleEventWriteApi } from "../calendar-sync/google-rest";
+import { resolveWritebackItems, writeBraindumpItems } from "../calendar-sync/writeback";
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -35,5 +39,36 @@ export default defineEventHandler(async (event) => {
     console.error("memory extraction failed (non-fatal):", error);
   }
 
-  return { ...extractResult, memoriesSaved };
+  // Mirror AI-created events + scheduled todos to the user's dedicated "Braindump"
+  // Google calendar so they appear in Google/other clients. Best-effort: never
+  // fail the dump if Google is unreachable.
+  let writtenToGoogle = 0;
+  try {
+    const db = getDb();
+    const items = await resolveWritebackItems(db, extractResult.created);
+    if (items.length > 0) {
+      const conns = await getGoogleConnections(db);
+      // Braindump items are personal — prefer the personal-role account.
+      const target = conns.find((c) => c.role === "personal") ?? conns[0];
+      if (target) {
+        const refresh = makeGoogleTokenRefresher(
+          process.env.GOOGLE_CLIENT_ID ?? "",
+          process.env.GOOGLE_CLIENT_SECRET ?? "",
+        );
+        const accessToken = await getFreshAccessToken(target, Date.now(), refresh);
+        writtenToGoogle = await writeBraindumpItems(
+          db,
+          target,
+          makeGoogleCalendarApi(accessToken),
+          makeGoogleEventWriteApi(accessToken),
+          items,
+          body.timeZone,
+        );
+      }
+    }
+  } catch (error) {
+    console.error("braindump Google write-back failed (non-fatal):", error);
+  }
+
+  return { ...extractResult, memoriesSaved, writtenToGoogle };
 });

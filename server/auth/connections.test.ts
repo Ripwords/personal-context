@@ -28,6 +28,9 @@ test("setBraindumpCalendarId stores the calendar id", async () => {
   expect(c.braindumpCalendarId).toBe("cal_123");
 });
 
-test("setBraindumpCalendarId throws when no connection exists", async () => {
-  await expect(setBraindumpCalendarId(db, "missing", "cal")).rejects.toThrow(/no google_connections row/i);
+test("setBraindumpCalendarId creates a connection row when one doesn't exist yet", async () => {
+  // acc1 exists but has no google_connections row (role defaults via LEFT JOIN).
+  const c = await setBraindumpCalendarId(db, "acc1", "cal_new");
+  expect(c.braindumpCalendarId).toBe("cal_new");
+  expect(c.role).toBe("personal"); // seeded default
 });
