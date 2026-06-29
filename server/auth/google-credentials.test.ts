@@ -25,3 +25,18 @@ test("getGoogleConnections returns tokens, role, and calendar id per google acco
   expect(conns[0]!.role).toBe("work");
   expect(conns[0]!.braindumpCalendarId).toBeNull();
 });
+
+test("getGoogleConnections includes google accounts with no connection row, defaulting role to personal", async () => {
+  await db.execute(sql`INSERT INTO "account" (id, account_id, provider_id, user_id, access_token, refresh_token)
+    VALUES ('acc2','g2','google','u1','at_2','rt_2')`);
+
+  const conns = await getGoogleConnections(db);
+  const byId = Object.fromEntries(conns.map((c) => [c.accountId, c]));
+
+  expect(conns.length).toBe(2);
+  expect(byId["acc2"]!.accessToken).toBe("at_2");
+  expect(byId["acc2"]!.role).toBe("personal");
+  expect(byId["acc2"]!.braindumpCalendarId).toBeNull();
+  // The account that DID get a role still reports it.
+  expect(byId["acc1"]!.role).toBe("work");
+});
