@@ -10,19 +10,36 @@ defineProps<{
   todos: UnscheduledTodo[];
   projectColorMap: Record<string, string>;
 }>();
+
+const emit = defineEmits<{
+  drop: [id: string];
+  "clear-all": [];
+}>();
 </script>
 
 <template>
   <aside class="flex flex-col gap-1 px-3 py-4 overflow-y-auto" aria-label="Unscheduled tasks">
-    <p class="text-[10px] font-semibold tracking-widest uppercase text-neutral-400 px-2 mb-2">
-      Inbox
-    </p>
+    <div class="flex items-center justify-between px-2 mb-2">
+      <p class="text-[10px] font-semibold tracking-widest uppercase text-neutral-400">
+        Inbox
+      </p>
+      <button
+        v-if="todos.length > 0"
+        type="button"
+        class="text-[10px] font-medium text-neutral-400 hover:text-neutral-700
+               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+               motion-safe:transition-colors"
+        @click="emit('clear-all')"
+      >
+        Clear all
+      </button>
+    </div>
 
     <ul class="flex flex-col gap-1">
       <li
         v-for="todo in todos"
         :key="todo.id"
-        class="flex items-start gap-2 rounded border border-neutral-200 px-3 py-2 bg-white
+        class="group flex items-start gap-2 rounded border border-neutral-200 px-3 py-2 bg-white
                text-sm text-neutral-800 cursor-default select-none"
       >
         <!-- project colour tick -->
@@ -32,7 +49,18 @@ defineProps<{
           :style="{ backgroundColor: projectColorMap[todo.projectId] }"
           aria-hidden="true"
         />
-        <span class="leading-snug break-words">{{ todo.title }}</span>
+        <span class="leading-snug break-words flex-1">{{ todo.title }}</span>
+        <button
+          type="button"
+          class="shrink-0 text-neutral-300 opacity-0 group-hover:opacity-100
+                 hover:text-neutral-700 focus-visible:opacity-100 focus-visible:outline-none
+                 focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+                 motion-safe:transition-opacity"
+          :aria-label="`Clear ${todo.title}`"
+          @click="emit('drop', todo.id)"
+        >
+          ✕
+        </button>
       </li>
     </ul>
 

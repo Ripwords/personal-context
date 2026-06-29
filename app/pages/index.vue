@@ -63,6 +63,7 @@ const {
   data: feed,
   status,
   error,
+  refresh,
 } = await useFetch<CalendarFeed>("/api/calendar/events", {
   query: computed(() => ({ from: fromISO.value, to: toISO.value })),
 });
@@ -115,6 +116,16 @@ const scheduledTodos = computed(() => {
 });
 
 const unscheduledTodos = computed(() => feed.value?.unscheduledTodos ?? []);
+
+async function dropTodo(id: string): Promise<void> {
+  await $fetch(`/api/todos/${id}`, { method: "DELETE" });
+  await refresh();
+}
+
+async function clearUnscheduled(): Promise<void> {
+  await $fetch("/api/todos/clear-unscheduled", { method: "POST" });
+  await refresh();
+}
 
 // ── Sign out ──────────────────────────────────────────────────────────────
 
@@ -313,6 +324,8 @@ const weekLabel = computed(() => {
         <UnscheduledRail
           :todos="unscheduledTodos"
           :project-color-map="projectColorMap"
+          @drop="dropTodo"
+          @clear-all="clearUnscheduled"
         />
       </aside>
     </div>
