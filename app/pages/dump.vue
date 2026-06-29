@@ -35,7 +35,7 @@ async function capture(): Promise<void> {
   try {
     const result = await $fetch<DumpResult>("/api/dump", {
       method: "POST",
-      body: { text: text.value },
+      body: { text: text.value, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     });
 
     lastCreated.value = result.created;

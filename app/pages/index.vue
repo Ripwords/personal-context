@@ -142,7 +142,10 @@ async function submitDump(): Promise<void> {
   if (!text || dumping.value) return;
   dumping.value = true;
   try {
-    const res = await $fetch<DumpResult>("/api/dump", { method: "POST", body: { text } });
+    const res = await $fetch<DumpResult>("/api/dump", {
+      method: "POST",
+      body: { text, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    });
     dumpText.value = "";
     await refresh();
     const todos = res.created.filter((c) => c.kind === "todo").length;

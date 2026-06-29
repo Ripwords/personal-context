@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
 
   interface DumpRequest {
     text?: string;
+    timeZone?: string;
   }
 
   const body = await readBody<DumpRequest>(event);
@@ -21,7 +22,7 @@ export default defineEventHandler(async (event) => {
 
   let extractResult: Awaited<ReturnType<typeof extractFromDump>>;
   try {
-    extractResult = await extractFromDump(getDb(), makeModel(), body.text);
+    extractResult = await extractFromDump(getDb(), makeModel(), body.text, body.timeZone);
   } catch (error) {
     console.error("extraction failed:", error);
     throw createError({ statusCode: 502, statusMessage: "extraction failed" });

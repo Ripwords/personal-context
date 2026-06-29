@@ -154,6 +154,7 @@ export async function extractFromDump(
   db: Db,
   model: LanguageModel,
   text: string,
+  timeZone?: string,
 ): Promise<ExtractResult> {
   const projects = await listProjects(db);
   const dump = await createDump(db, text);
@@ -163,12 +164,14 @@ export async function extractFromDump(
       ? projects.map((p) => p.name).join(", ")
       : "(none)";
 
+  // Prefer the caller's timezone (the server runs in UTC) so "today"/"2pm"
+  // resolve to the user's local day.
   const now = new Date();
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timezone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const system = `You are a personal assistant helping to extract structured items from a brain dump.
 
-The current datetime is ${now.toISOString()} (timezone ${timezone}). Resolve all relative dates and times (today, tomorrow, Friday, this weekend, 3pm) against it, and output absolute ISO 8601 datetimes.
+The current local datetime is ${now.toLocaleString("en-US", { timeZone: timezone, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} (timezone ${timezone}). Resolve all relative dates and times (today, tomorrow, Friday, this weekend, 3pm) against it, and output absolute ISO 8601 datetimes.
 
 Extract concrete, actionable todos and calendar events from the user's text.
 For each item:
