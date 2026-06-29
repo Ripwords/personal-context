@@ -1,4 +1,4 @@
-import { and, gte, lt, isNull, eq, desc } from "drizzle-orm";
+import { and, gte, lt, lte, isNull, eq, ilike, desc } from "drizzle-orm";
 import { type Db, type DbOrTx } from "../client";
 import {
   dumps,
@@ -59,6 +59,31 @@ export async function listEventsInRange(
     .from(events)
     .where(and(gte(events.startsAt, from), lt(events.startsAt, to)))
     .orderBy(events.startsAt);
+}
+
+/**
+ * Find events whose title contains `title` (case-insensitive), optionally
+ * constrained to a [from, to) window. Used to resolve "remove the X meeting".
+ */
+export async function findEventsByTitle(
+  db: Db,
+  title: string,
+  from?: Date,
+  to?: Date,
+): Promise<EventRow[]> {
+  const conds = [ilike(events.title, `%${title}%`)];
+  if (from) conds.push(gte(events.startsAt, from));
+  if (to) conds.push(lte(events.startsAt, to));
+  return db
+    .select()
+    .from(events)
+    .where(and(...conds))
+    .orderBy(events.startsAt);
+}
+
+export async function deleteEvent(db: DbOrTx, id: string): Promise<EventRow | null> {
+  const [row] = await db.delete(events).where(eq(events.id, id)).returning();
+  return row ?? null;
 }
 
 export async function logActivity(db: DbOrTx, input: NewActivity): Promise<Activity> {

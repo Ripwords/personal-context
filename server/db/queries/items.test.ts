@@ -8,6 +8,8 @@ import {
   listScheduledTodosInRange,
   createEvent,
   listEventsInRange,
+  findEventsByTitle,
+  deleteEvent,
   logActivity,
   listActivity,
   dropTodo,
@@ -72,6 +74,23 @@ test("listEventsInRange filters by startsAt window", async () => {
     new Date("2026-07-02T00:00:00Z"),
   );
   expect(rows.map((r) => r.title)).toEqual(["standup"]);
+});
+
+test("findEventsByTitle matches case-insensitive substrings and optional range; deleteEvent removes a row", async () => {
+  await createEvent(db, { title: "Standup with Team", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T09:15:00Z") });
+  await createEvent(db, { title: "Design review", startsAt: new Date("2026-07-01T14:00:00Z"), endsAt: new Date("2026-07-01T15:00:00Z") });
+  await createEvent(db, { title: "Standup with Team", startsAt: new Date("2026-07-08T09:00:00Z"), endsAt: new Date("2026-07-08T09:15:00Z") });
+
+  const all = await findEventsByTitle(db, "standup");
+  expect(all.length).toBe(2);
+
+  const thisWeek = await findEventsByTitle(db, "STANDUP", new Date("2026-07-01T00:00:00Z"), new Date("2026-07-02T00:00:00Z"));
+  expect(thisWeek.length).toBe(1);
+
+  const deleted = await deleteEvent(db, thisWeek[0]!.id);
+  expect(deleted?.id).toBe(thisWeek[0]!.id);
+  expect((await findEventsByTitle(db, "standup")).length).toBe(1);
+  expect(await deleteEvent(db, "00000000-0000-0000-0000-000000000000")).toBeNull();
 });
 
 test("activity log is returned newest first", async () => {

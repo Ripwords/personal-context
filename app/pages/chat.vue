@@ -65,6 +65,14 @@ interface ReadCalendarOutput {
   error?: string;
 }
 
+interface DeleteEventOutput {
+  deleted: boolean;
+  title?: string;
+  reason?: "not-found" | "ambiguous";
+  query?: string;
+  matches?: { title: string; startsAt: string }[];
+}
+
 // ── Typed tool part ───────────────────────────────────────────────────────────
 
 type ToolName =
@@ -73,6 +81,7 @@ type ToolName =
   | "search_memory"
   | "create_todo"
   | "create_event"
+  | "delete_event"
   | "read_calendar";
 
 type ToolOutputMap = {
@@ -81,6 +90,7 @@ type ToolOutputMap = {
   search_memory: SearchMemoryOutput;
   create_todo: CreateTodoOutput;
   create_event: CreateEventOutput;
+  delete_event: DeleteEventOutput;
   read_calendar: ReadCalendarOutput;
 };
 
@@ -101,6 +111,7 @@ function isKnownTool(name: string): name is ToolName {
     "search_memory",
     "create_todo",
     "create_event",
+    "delete_event",
     "read_calendar",
   ].includes(name);
 }
@@ -165,6 +176,9 @@ function asCreateEvent(output: unknown): CreateEventOutput {
 }
 function asReadCalendar(output: unknown): ReadCalendarOutput {
   return output as ReadCalendarOutput;
+}
+function asDeleteEvent(output: unknown): DeleteEventOutput {
+  return output as DeleteEventOutput;
 }
 
 // ── Chat setup ────────────────────────────────────────────────────────────────
@@ -503,6 +517,19 @@ function formatTime(iso: string): string {
                 </p>
                 <p v-else class="text-xs bd-faint px-1 tabular-nums">
                   ✓ created event: {{ asCreateEvent(tp.output).title }}{{ googleSyncNote(asCreateEvent(tp.output).googleSync) }}
+                </p>
+              </template>
+
+              <!-- delete_event output -->
+              <template v-else-if="tp.toolName === 'delete_event'">
+                <p v-if="asDeleteEvent(tp.output).deleted" class="text-xs bd-faint px-1 tabular-nums">
+                  ✓ removed: {{ asDeleteEvent(tp.output).title }}
+                </p>
+                <p v-else-if="asDeleteEvent(tp.output).reason === 'not-found'" class="text-xs bd-faint px-1">
+                  · no event matching “{{ asDeleteEvent(tp.output).query }}”
+                </p>
+                <p v-else class="text-xs bd-faint px-1">
+                  · multiple matches — which one? {{ (asDeleteEvent(tp.output).matches ?? []).map((m) => m.title).join(", ") }}
                 </p>
               </template>
 

@@ -2,7 +2,7 @@ import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../db/test-helpers";
 import { createProject } from "../db/queries/projects";
 import { createMemory } from "../db/queries/memory";
-import { listActivity } from "../db/queries/items";
+import { listActivity, createEvent, findEventsByTitle } from "../db/queries/items";
 import { makeChatTools } from "./chat-tools";
 
 // Strategy: call each tool's execute() directly — no LLM, no network.
@@ -61,6 +61,49 @@ test("create_todo: creates todo without project when name doesn't match", async 
   expect(acts).toHaveLength(1);
   const payload = acts[0]!.payload as { projectId: string | null };
   expect(payload.projectId).toBeNull();
+});
+
+// ── delete_event ─────────────────────────────────────────────────────────────
+
+test("delete_event: removes the single matching event and calls Google delete for synced events", async () => {
+  await createEvent(db, {
+    title: "Standup",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T09:15:00Z"),
+    googleEventId: "g1",
+    googleAccountId: "acc1",
+    calendarId: "cal1",
+  });
+  const googleDeletes: string[] = [];
+  const tools = makeChatTools(db, {}, {
+    deleteFromGoogle: async ({ accountId, calendarId, eventId }) => {
+      googleDeletes.push(`${accountId}/${calendarId}/${eventId}`);
+    },
+  });
+
+  const result = (await tools.delete_event.execute!(
+    { title: "standup" },
+    { toolCallId: "d1", messages: [] },
+  )) as { deleted: boolean; title?: string };
+
+  expect(result.deleted).toBe(true);
+  expect(result.title).toBe("Standup");
+  expect(googleDeletes).toEqual(["acc1/cal1/g1"]);
+  expect((await findEventsByTitle(db, "standup")).length).toBe(0);
+});
+
+test("delete_event: reports not-found / ambiguous instead of deleting", async () => {
+  const tools = makeChatTools(db, {});
+  const none = (await tools.delete_event.execute!({ title: "ghost" }, { toolCallId: "d2", messages: [] })) as { deleted: boolean; reason?: string };
+  expect(none).toMatchObject({ deleted: false, reason: "not-found" });
+
+  await createEvent(db, { title: "Sync meeting", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z") });
+  await createEvent(db, { title: "Sync meeting", startsAt: new Date("2026-07-02T09:00:00Z"), endsAt: new Date("2026-07-02T10:00:00Z") });
+  const many = (await tools.delete_event.execute!({ title: "sync" }, { toolCallId: "d3", messages: [] })) as { deleted: boolean; reason?: string; matches?: unknown[] };
+  expect(many).toMatchObject({ deleted: false, reason: "ambiguous" });
+  expect(many.matches!.length).toBe(2);
+  // ambiguous → nothing deleted
+  expect((await findEventsByTitle(db, "sync")).length).toBe(2);
 });
 
 // ── create_event ─────────────────────────────────────────────────────────────

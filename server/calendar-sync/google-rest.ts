@@ -91,6 +91,28 @@ export type EventWriteApi = {
   }): Promise<{ id: string }>;
 };
 
+export type EventDeleteApi = {
+  remove(input: { calendarId: string; eventId: string }): Promise<void>;
+};
+
+export function makeGoogleEventDeleteApi(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): EventDeleteApi {
+  return {
+    async remove({ calendarId, eventId }) {
+      const res = await fetchImpl(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      // 410 Gone = already deleted; treat as success.
+      if (!res.ok && res.status !== 410) {
+        throw new GoogleApiError(res.status, `delete event failed: ${res.status}`);
+      }
+    },
+  };
+}
+
 export function makeGoogleEventWriteApi(
   accessToken: string,
   fetchImpl: typeof fetch = fetch,

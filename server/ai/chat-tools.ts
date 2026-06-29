@@ -8,12 +8,25 @@ import { searchDocuments } from "../db/queries/documents";
 import { getCalendarFeed } from "../db/queries/calendar-feed";
 import { makeWebSearch } from "./web-search";
 import { createTodoFromInput, createEventFromInput } from "./extract";
+import { findEventsByTitle, deleteEvent } from "../db/queries/items";
 import { todoToolSchema, eventToolSchema } from "./tools";
 import type { WritebackItem } from "../calendar-sync/writeback";
 import { isAuthError } from "../calendar-sync/google-rest";
 
 /** Mirror an AI-created item to the user's Braindump Google calendar (best-effort). */
 export type MirrorFn = (item: WritebackItem) => Promise<void>;
+
+/** Delete an event from Google (its source calendar/account). Best-effort. */
+export type DeleteFromGoogleFn = (input: {
+  accountId: string;
+  calendarId: string;
+  eventId: string;
+}) => Promise<void>;
+
+export interface ChatToolDeps {
+  mirror?: MirrorFn;
+  deleteFromGoogle?: DeleteFromGoogleFn;
+}
 
 /** Result of a best-effort Google mirror, surfaced to the chat UI. */
 export type GoogleSync = "synced" | "needs-reauth" | "not-synced" | "off";
@@ -29,8 +42,10 @@ export type GoogleSync = "synced" | "needs-reauth" | "not-synced" | "off";
 export function makeChatTools(
   db: Db,
   env: Record<string, string | undefined> = process.env,
-  mirror?: MirrorFn,
+  deps: ChatToolDeps = {},
 ): ToolSet {
+  const { mirror, deleteFromGoogle } = deps;
+
   // Mirror to Google without ever failing the tool call; report the outcome.
   async function safeMirror(item: WritebackItem): Promise<GoogleSync> {
     if (!mirror) return "off";
@@ -87,6 +102,53 @@ export function makeChatTools(
           endsAt: new Date(inp.endsAt),
         });
         return { created: "event" as const, id: item.id, title: item.title, googleSync };
+      },
+    }),
+
+    delete_event: tool({
+      description:
+        "Remove/cancel/delete an existing calendar event the user no longer wants. " +
+        "Match by title (and optional date range). Use this for any 'remove', 'cancel', " +
+        "'delete', or 'drop' request — never create an event to represent a removal.",
+      inputSchema: z.object({
+        title: z.string().describe("Words from the event's title to match (case-insensitive substring)"),
+        from: z.string().optional().describe("ISO 8601 start of the day/range to search, if the user named a date"),
+        to: z.string().optional().describe("ISO 8601 end of the day/range to search"),
+      }),
+      execute: async ({ title, from, to }) => {
+        const fromDate = from ? new Date(from) : undefined;
+        const toDate = to ? new Date(to) : undefined;
+        const matches = await findEventsByTitle(
+          db,
+          title,
+          fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined,
+          toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined,
+        );
+        if (matches.length === 0) {
+          return { deleted: false as const, reason: "not-found" as const, query: title };
+        }
+        if (matches.length > 1) {
+          return {
+            deleted: false as const,
+            reason: "ambiguous" as const,
+            matches: matches.map((m) => ({ title: m.title, startsAt: m.startsAt.toISOString() })),
+          };
+        }
+        const ev = matches[0]!;
+        // Remove from Google first (so it won't re-sync), then locally.
+        if (deleteFromGoogle && ev.googleEventId && ev.googleAccountId && ev.calendarId) {
+          try {
+            await deleteFromGoogle({
+              accountId: ev.googleAccountId,
+              calendarId: ev.calendarId,
+              eventId: ev.googleEventId,
+            });
+          } catch (err) {
+            console.error(`delete_event: Google delete failed for ${ev.id}:`, err);
+          }
+        }
+        await deleteEvent(db, ev.id);
+        return { deleted: true as const, title: ev.title, startsAt: ev.startsAt.toISOString() };
       },
     }),
 

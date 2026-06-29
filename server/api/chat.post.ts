@@ -13,7 +13,7 @@ import { makeModel } from "../ai/model";
 import { makeChatTools } from "../ai/chat-tools";
 import { getGoogleConnections } from "../auth/google-credentials";
 import { getFreshAccessToken } from "../calendar-sync/access-token";
-import { makeGoogleTokenRefresher, makeGoogleCalendarApi, makeGoogleEventWriteApi } from "../calendar-sync/google-rest";
+import { makeGoogleTokenRefresher, makeGoogleCalendarApi, makeGoogleEventWriteApi, makeGoogleEventDeleteApi } from "../calendar-sync/google-rest";
 import { makeBraindumpMirror, type WritebackItem } from "../calendar-sync/writeback";
 import { searchMemories } from "../db/queries/memory";
 import { listProjects } from "../db/queries/projects";
@@ -91,6 +91,7 @@ export default defineEventHandler(async (event) => {
     projectsBlock,
     `\nTool guidance:`,
     `- Use create_todo / create_event to capture tasks and events the user mentions.`,
+    `- To remove, cancel, delete, or drop an event the user no longer wants, use delete_event (match by title, plus from/to if they named a date). NEVER create an event to represent a deletion. If delete_event reports multiple matches, ask the user which one; if none, say so.`,
     `- Use search_memory / search_documents before answering from memory.`,
     `- Use web_search for current or external information.`,
     `- Use read_calendar to check the user's schedule.`,
@@ -100,6 +101,27 @@ export default defineEventHandler(async (event) => {
 
   const modelMessages = await convertToModelMessages(messages);
 
+  const refresher = makeGoogleTokenRefresher(
+    process.env.GOOGLE_CLIENT_ID ?? "",
+    process.env.GOOGLE_CLIENT_SECRET ?? "",
+  );
+
+  // Per-account fresh access token, resolved at most once each.
+  const tokenByAccount = new Map<string, Promise<string>>();
+  async function tokenFor(conn: { accountId: string }): Promise<string> {
+    let p = tokenByAccount.get(conn.accountId);
+    if (!p) {
+      p = (async () => {
+        const conns = await getGoogleConnections(db);
+        const full = conns.find((c) => c.accountId === conn.accountId);
+        if (!full) throw new Error(`no connection for ${conn.accountId}`);
+        return getFreshAccessToken(full, Date.now(), refresher);
+      })();
+      tokenByAccount.set(conn.accountId, p);
+    }
+    return p;
+  }
+
   // Lazily resolve the Braindump mirror: the connection + access token are only
   // fetched the first time the assistant actually creates an event/timed todo.
   let mirrorPromise: Promise<((item: WritebackItem) => Promise<void>) | null> | null = null;
@@ -108,19 +130,21 @@ export default defineEventHandler(async (event) => {
       const conns = await getGoogleConnections(db);
       const target = conns.find((c) => c.role === "personal") ?? conns[0];
       if (!target) return null;
-      const refresh = makeGoogleTokenRefresher(
-        process.env.GOOGLE_CLIENT_ID ?? "",
-        process.env.GOOGLE_CLIENT_SECRET ?? "",
-      );
-      const at = await getFreshAccessToken(target, Date.now(), refresh);
+      const at = await tokenFor(target);
       return makeBraindumpMirror(db, target, makeGoogleCalendarApi(at), makeGoogleEventWriteApi(at), body.timeZone);
     })()).then((m) => (m ? m(item) : undefined));
+
+  // Delete an event from the calendar/account it actually lives in.
+  const deleteFromGoogle = async (input: { accountId: string; calendarId: string; eventId: string }) => {
+    const at = await tokenFor({ accountId: input.accountId });
+    await makeGoogleEventDeleteApi(at).remove({ calendarId: input.calendarId, eventId: input.eventId });
+  };
 
   const result = streamText({
     model: makeModel(),
     system,
     messages: modelMessages,
-    tools: makeChatTools(db, process.env, mirror),
+    tools: makeChatTools(db, process.env, { mirror, deleteFromGoogle }),
     stopWhen: stepCountIs(8),
     onFinish: async ({ text }) => {
       await addChatMessage(db, {
