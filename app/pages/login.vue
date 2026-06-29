@@ -15,15 +15,15 @@ async function signin() {
 
 <template>
   <main
-    class="min-h-dvh flex flex-col items-center justify-center gap-6 bg-neutral-50 text-neutral-900"
+    class="min-h-dvh flex flex-col items-center justify-center gap-6 bd-bg bd-text"
   >
     <h1 class="text-3xl font-semibold tracking-tight">Braindump</h1>
-    <p class="text-sm text-neutral-500">Dump everything. Wake up to a plan.</p>
+    <p class="text-sm bd-faint">Dump everything. Wake up to a plan.</p>
 
     <button
       type="button"
       :disabled="loading"
-      class="inline-flex items-center gap-3 rounded-md border border-neutral-300 bg-white px-5 py-2.5 text-sm font-medium text-neutral-700 motion-safe:transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2 disabled:opacity-50"
+      class="inline-flex items-center gap-3 rounded-md border bd-border bd-surface px-5 py-2.5 text-sm font-medium bd-text motion-safe:transition-colors bd-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bd-bg)] disabled:opacity-50"
       @click="signin"
     >
       <!-- Official Google "G" logo (brand asset; kept in brand colors) -->

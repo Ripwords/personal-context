@@ -275,15 +275,15 @@ function formatTime(iso: string): string {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-neutral-50 text-neutral-900 flex">
+  <div class="min-h-dvh bd-bg bd-text flex">
     <!-- Sidebar -->
-    <aside class="w-56 shrink-0 border-r border-neutral-200 bg-white flex flex-col">
+    <aside class="w-56 shrink-0 border-r bd-border bd-surface flex flex-col">
       <!-- New chat button -->
-      <div class="p-3 border-b border-neutral-200">
+      <div class="p-3 border-b bd-border">
         <button
-          class="w-full text-left text-sm px-3 py-2 rounded border border-neutral-200
-                 hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2
-                 focus-visible:ring-neutral-900 motion-safe:transition-colors"
+          class="w-full text-left text-sm px-3 py-2 rounded border bd-border
+                 bd-hover focus-visible:outline-none focus-visible:ring-2
+                 focus-visible:ring-neutral-500 motion-safe:transition-colors"
           @click="newChat"
         >
           + New chat
@@ -292,7 +292,7 @@ function formatTime(iso: string): string {
 
       <!-- Session list -->
       <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" aria-label="Chat history">
-        <div v-if="sessions.length === 0" class="text-xs text-neutral-400 px-3 py-2 select-none">
+        <div v-if="sessions.length === 0" class="text-xs bd-faint px-3 py-2 select-none">
           No chats yet
         </div>
         <div
@@ -300,10 +300,10 @@ function formatTime(iso: string): string {
           :key="s.id"
           :class="[
             'group flex items-center gap-1 rounded px-2 py-1.5 text-xs cursor-pointer',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500',
             currentSessionId === s.id
-              ? 'bg-neutral-900 text-white'
-              : 'text-neutral-700 hover:bg-neutral-100',
+              ? 'bg-neutral-700 text-white'
+              : 'bd-muted bd-hover',
           ]"
           tabindex="0"
           role="button"
@@ -315,10 +315,10 @@ function formatTime(iso: string): string {
         >
           <span class="flex-1 truncate">{{ s.title }}</span>
           <button
-            class="shrink-0 opacity-0 group-hover:opacity-100 text-neutral-400
-                   hover:text-neutral-700 focus-visible:opacity-100 focus-visible:outline-none
-                   focus-visible:ring-1 focus-visible:ring-neutral-900 rounded"
-            :class="{ 'text-neutral-300 hover:text-white': currentSessionId === s.id }"
+            class="shrink-0 opacity-0 group-hover:opacity-100 bd-faint
+                   hover:bd-text focus-visible:opacity-100 focus-visible:outline-none
+                   focus-visible:ring-1 focus-visible:ring-neutral-500 rounded"
+            :class="{ 'bd-faint hover:text-white': currentSessionId === s.id }"
             :aria-label="`Delete chat: ${s.title}`"
             @click.stop="deleteSession(s.id)"
           >
@@ -332,18 +332,18 @@ function formatTime(iso: string): string {
     <div class="flex-1 flex flex-col min-w-0">
     <!-- Header -->
     <header
-      class="flex items-center justify-between px-4 py-2 border-b border-neutral-200 bg-white shrink-0"
+      class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0"
     >
       <NuxtLink
         to="/"
-        class="text-sm text-neutral-500 hover:text-neutral-900 focus-visible:outline-none
-               focus-visible:ring-2 focus-visible:ring-neutral-900 rounded
+        class="text-sm bd-faint hover:bd-text focus-visible:outline-none
+               focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
                motion-safe:transition-colors"
         aria-label="Back to calendar"
       >
         ← Calendar
       </NuxtLink>
-      <h1 class="text-sm font-medium text-neutral-700 select-none">Chat</h1>
+      <h1 class="text-sm font-medium bd-muted select-none">Chat</h1>
       <span class="w-16" aria-hidden="true" />
     </header>
 
@@ -358,7 +358,7 @@ function formatTime(iso: string): string {
       <!-- Empty state -->
       <div
         v-if="messages.length === 0"
-        class="flex items-center justify-center h-full text-sm text-neutral-400 select-none"
+        class="flex items-center justify-center h-full text-sm bd-faint select-none"
       >
         Ask anything about your schedule, todos, or notes.
       </div>
@@ -377,8 +377,8 @@ function formatTime(iso: string): string {
             :class="[
               'max-w-prose rounded px-3 py-2 text-sm leading-relaxed',
               msg.role === 'user'
-                ? 'bg-neutral-900 text-white'
-                : 'bg-white border border-neutral-200 text-neutral-900',
+                ? 'bg-neutral-700 text-white'
+                : 'bd-surface border bd-border bd-text',
             ]"
           >
             <span class="sr-only">{{ msg.role === "user" ? "You" : "Assistant" }}: </span>
@@ -402,7 +402,7 @@ function formatTime(iso: string): string {
               <!-- Running state -->
               <p
                 v-if="tp.state !== 'output-available'"
-                class="text-xs text-neutral-400 tabular-nums select-none px-1"
+                class="text-xs bd-faint tabular-nums select-none px-1"
               >
                 · running {{ tp.toolName }}…
               </p>
@@ -411,7 +411,7 @@ function formatTime(iso: string): string {
               <template v-else-if="tp.toolName === 'web_search'">
                 <div
                   v-if="!asWebSearch(tp.output).configured"
-                  class="text-xs text-neutral-400 px-1"
+                  class="text-xs bd-faint px-1"
                 >
                   {{ asWebSearch(tp.output).note ?? "Web search not configured." }}
                 </div>
@@ -422,7 +422,7 @@ function formatTime(iso: string): string {
                   <li
                     v-for="(r, i) in asWebSearch(tp.output).results"
                     :key="i"
-                    class="border border-neutral-200 rounded px-3 py-2 bg-white"
+                    class="border bd-border rounded px-3 py-2 bd-surface"
                   >
                     <a
                       :href="r.url"
@@ -430,15 +430,15 @@ function formatTime(iso: string): string {
                       rel="noopener noreferrer"
                       class="block group"
                     >
-                      <div class="text-xs font-medium text-neutral-800 group-hover:underline leading-snug">
+                      <div class="text-xs font-medium bd-text group-hover:underline leading-snug">
                         {{ r.title }}
                       </div>
-                      <div class="text-xs text-neutral-400 truncate mt-0.5">{{ r.url }}</div>
-                      <div class="text-xs text-neutral-600 mt-1 leading-relaxed">{{ r.snippet }}</div>
+                      <div class="text-xs bd-faint truncate mt-0.5">{{ r.url }}</div>
+                      <div class="text-xs bd-muted mt-1 leading-relaxed">{{ r.snippet }}</div>
                     </a>
                   </li>
                 </ul>
-                <p v-else class="text-xs text-neutral-400 px-1">No web results found.</p>
+                <p v-else class="text-xs bd-faint px-1">No web results found.</p>
               </template>
 
               <!-- search_documents output -->
@@ -450,13 +450,13 @@ function formatTime(iso: string): string {
                   <li
                     v-for="(c, i) in asSearchDocuments(tp.output).chunks"
                     :key="i"
-                    class="border border-neutral-200 rounded px-3 py-2 bg-white"
+                    class="border bd-border rounded px-3 py-2 bd-surface"
                   >
-                    <div class="text-xs text-neutral-400 mb-0.5">{{ c.filename }}</div>
-                    <div class="text-xs text-neutral-700 leading-relaxed line-clamp-3">{{ c.content }}</div>
+                    <div class="text-xs bd-faint mb-0.5">{{ c.filename }}</div>
+                    <div class="text-xs bd-muted leading-relaxed line-clamp-3">{{ c.content }}</div>
                   </li>
                 </ul>
-                <p v-else class="text-xs text-neutral-400 px-1">· no document chunks found</p>
+                <p v-else class="text-xs bd-faint px-1">· no document chunks found</p>
               </template>
 
               <!-- search_memory output -->
@@ -468,17 +468,17 @@ function formatTime(iso: string): string {
                   <li
                     v-for="(m, i) in asSearchMemory(tp.output).memories"
                     :key="i"
-                    class="text-xs text-neutral-600"
+                    class="text-xs bd-muted"
                   >
                     {{ m }}
                   </li>
                 </ul>
-                <p v-else class="text-xs text-neutral-400 px-1">· no memories found</p>
+                <p v-else class="text-xs bd-faint px-1">· no memories found</p>
               </template>
 
               <!-- create_todo output -->
               <template v-else-if="tp.toolName === 'create_todo'">
-                <p class="text-xs text-neutral-500 px-1 tabular-nums">
+                <p class="text-xs bd-faint px-1 tabular-nums">
                   ✓ created todo: {{ asCreateTodo(tp.output).title }}
                 </p>
               </template>
@@ -487,19 +487,19 @@ function formatTime(iso: string): string {
               <template v-else-if="tp.toolName === 'create_event'">
                 <p
                   v-if="asCreateEvent(tp.output).error"
-                  class="text-xs text-neutral-500 px-1"
+                  class="text-xs bd-faint px-1"
                 >
                   · event not created: {{ asCreateEvent(tp.output).error }}
                 </p>
-                <p v-else class="text-xs text-neutral-500 px-1 tabular-nums">
+                <p v-else class="text-xs bd-faint px-1 tabular-nums">
                   ✓ created event: {{ asCreateEvent(tp.output).title }}
                 </p>
               </template>
 
               <!-- read_calendar output -->
               <template v-else-if="tp.toolName === 'read_calendar'">
-                <div class="border border-neutral-200 rounded px-3 py-2 bg-white mt-1">
-                  <div class="text-xs text-neutral-400 mb-1 tabular-nums">
+                <div class="border bd-border rounded px-3 py-2 bd-surface mt-1">
+                  <div class="text-xs bd-faint mb-1 tabular-nums">
                     {{ asReadCalendar(tp.output).events.length }} event{{
                       asReadCalendar(tp.output).events.length === 1 ? "" : "s"
                     }},
@@ -512,9 +512,9 @@ function formatTime(iso: string): string {
                     <li
                       v-for="(ev, i) in asReadCalendar(tp.output).events"
                       :key="i"
-                      class="text-xs text-neutral-700 tabular-nums flex gap-2"
+                      class="text-xs bd-muted tabular-nums flex gap-2"
                     >
-                      <span class="text-neutral-400 shrink-0">
+                      <span class="bd-faint shrink-0">
                         {{ formatTime(ev.startsAt) }}
                       </span>
                       <span>{{ ev.title }}</span>
@@ -527,7 +527,7 @@ function formatTime(iso: string): string {
                     <li
                       v-for="(t, i) in asReadCalendar(tp.output).scheduledTodos"
                       :key="i"
-                      class="text-xs text-neutral-500"
+                      class="text-xs bd-faint"
                     >
                       ☐ {{ t.title }}
                     </li>
@@ -539,7 +539,7 @@ function formatTime(iso: string): string {
                     <li
                       v-for="(t, i) in asReadCalendar(tp.output).unscheduledTodos"
                       :key="i"
-                      class="text-xs text-neutral-400"
+                      class="text-xs bd-faint"
                     >
                       ☐ {{ t.title }} <span class="italic">(unscheduled)</span>
                     </li>
@@ -553,7 +553,7 @@ function formatTime(iso: string): string {
         <!-- Streaming indicator -->
         <li v-if="isStreaming" class="flex items-start" aria-label="Assistant is typing">
           <div
-            class="bg-white border border-neutral-200 rounded px-3 py-2 text-sm text-neutral-400
+            class="bd-surface border bd-border rounded px-3 py-2 text-sm bd-faint
                    motion-safe:animate-pulse select-none"
             aria-busy="true"
           >
@@ -566,14 +566,14 @@ function formatTime(iso: string): string {
       <p
         v-if="error"
         role="alert"
-        class="mt-4 text-sm text-center text-neutral-500"
+        class="mt-4 text-sm text-center bd-faint"
       >
         Something went wrong. Please try again.
       </p>
     </main>
 
     <!-- Input area -->
-    <footer class="border-t border-neutral-200 bg-white px-4 py-3 shrink-0">
+    <footer class="border-t bd-border bd-surface px-4 py-3 shrink-0">
       <form
         class="flex gap-2 max-w-2xl mx-auto"
         aria-label="Send a message"
@@ -586,18 +586,18 @@ function formatTime(iso: string): string {
           name="message"
           rows="2"
           placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-          class="flex-1 resize-none rounded border border-neutral-200 bg-neutral-50 px-3 py-2
-                 text-sm leading-relaxed text-neutral-900 placeholder:text-neutral-400
-                 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900
+          class="flex-1 resize-none rounded border bd-border bd-bg px-3 py-2
+                 text-sm leading-relaxed bd-text placeholder:bd-faint
+                 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500
                  motion-safe:transition-colors disabled:opacity-50"
           :disabled="isStreaming"
           @keydown="handleKeydown"
         />
         <button
           type="submit"
-          class="self-end px-4 py-2 rounded border border-neutral-900 bg-neutral-900 text-white
-                 text-sm font-medium hover:bg-neutral-700 focus-visible:outline-none
-                 focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2
+          class="self-end px-4 py-2 rounded border border-neutral-700 bg-neutral-700 text-white
+                 text-sm font-medium hover:bg-neutral-600 focus-visible:outline-none
+                 focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2
                  motion-safe:transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="isStreaming || !input.trim()"
           aria-label="Send message"
