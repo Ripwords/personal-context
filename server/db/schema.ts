@@ -72,11 +72,31 @@ export const events = pgTable("events", {
   projectId: uuid("project_id").references(() => projects.id),
   googleEventId: text("google_event_id"),
   googleAccountId: text("google_account_id"),
+  // Which Google calendar this event came from (id within the account). Joins to
+  // google_calendar (googleAccountId, calendarId) for the calendar's display color.
+  calendarId: text("calendar_id"),
+  allDay: boolean("all_day").notNull().default(false),
   dumpId: uuid("dump_id").references(() => dumps.id),
   syncStatus: eventSyncStatus("sync_status").notNull().default("local"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   googleIdentity: uniqueIndex("events_google_identity").on(t.googleAccountId, t.googleEventId),
+}));
+
+// One row per Google calendar within a connected account. Carries the calendar's
+// display color (from calendarList) and the user's show/hide toggle (`selected`).
+export const googleCalendar = pgTable("google_calendar", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  accountId: text("account_id").notNull(),
+  calendarId: text("calendar_id").notNull(),
+  summary: text("summary").notNull(),
+  backgroundColor: text("background_color"),
+  foregroundColor: text("foreground_color"),
+  selected: boolean("selected").notNull().default(true),
+  primary: boolean("primary").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  identity: uniqueIndex("google_calendar_identity").on(t.accountId, t.calendarId),
 }));
 
 export const memory = pgTable("memory", {
@@ -131,6 +151,8 @@ export type Todo = typeof todos.$inferSelect;
 export type NewTodo = typeof todos.$inferInsert;
 export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
+export type GoogleCalendar = typeof googleCalendar.$inferSelect;
+export type NewGoogleCalendar = typeof googleCalendar.$inferInsert;
 export type Activity = typeof activities.$inferSelect;
 export type NewActivity = typeof activities.$inferInsert;
 export type Memory = typeof memory.$inferSelect;
