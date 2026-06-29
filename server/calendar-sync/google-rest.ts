@@ -1,5 +1,5 @@
 import type { TokenRefresher } from "./access-token";
-import type { EventsApi, RawGoogleEvent } from "./sync-events";
+import type { CalendarListApi, EventsApi, RawGoogleCalendar, RawGoogleEvent } from "./sync-events";
 
 export function makeGoogleTokenRefresher(
   clientId: string,
@@ -38,6 +38,18 @@ export function makeGoogleEventsApi(fetchImpl: typeof fetch = fetch): EventsApi 
       const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) throw new Error(`calendar list failed: ${res.status}`);
       const json = (await res.json()) as { items?: RawGoogleEvent[] };
+      return json.items ?? [];
+    },
+  };
+}
+
+export function makeGoogleCalendarListApi(fetchImpl: typeof fetch = fetch): CalendarListApi {
+  return {
+    async list({ accessToken }) {
+      const url = "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader";
+      const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) throw new Error(`calendarList failed: ${res.status}`);
+      const json = (await res.json()) as { items?: RawGoogleCalendar[] };
       return json.items ?? [];
     },
   };
