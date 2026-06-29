@@ -289,8 +289,9 @@ const weekLabel = computed(() => {
 
     <!-- ── Three-pane body ─────────────────────────────────────────────── -->
     <div class="flex flex-1 overflow-hidden">
-      <!-- Left rail: projects -->
-      <aside class="w-44 shrink-0 border-r border-neutral-200 bg-white overflow-y-auto">
+      <!-- Left rail: calendars + projects -->
+      <aside class="w-44 shrink-0 border-r border-neutral-200 bg-white overflow-y-auto flex flex-col">
+        <CalendarRail @changed="refresh" />
         <ProjectRail
           :projects="projects"
           :active-ids="activeProjectIds"
