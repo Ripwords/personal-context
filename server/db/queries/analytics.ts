@@ -11,11 +11,32 @@ export type Analytics = {
   streakDays: number;
 };
 
-function toUtcDateString(d: Date): string {
-  return d.toISOString().slice(0, 10);
+/** The local calendar date (YYYY-MM-DD) of an instant in the given IANA zone. */
+function localDateStr(d: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
 
-export async function getAnalytics(db: Db, now: Date): Promise<Analytics> {
+/**
+ * Step a YYYY-MM-DD calendar date by whole days. Anchored at UTC midnight and
+ * only ever sliced back to a date, so DST never shifts the result.
+ */
+function stepDays(dateStr: string, deltaDays: number): string {
+  const anchor = new Date(`${dateStr}T00:00:00Z`);
+  anchor.setUTCDate(anchor.getUTCDate() + deltaDays);
+  return anchor.toISOString().slice(0, 10);
+}
+
+/**
+ * Aggregate analytics. Day/hour buckets are computed in `timeZone` (an IANA zone
+ * like "America/New_York") so a dump near local midnight lands on the right local
+ * day/hour. Defaults to UTC.
+ */
+export async function getAnalytics(db: Db, now: Date, timeZone = "UTC"): Promise<Analytics> {
   // ── 1. Todos by status ─────────────────────────────────────────────────────
   const todosByStatus = await db
     .select({ status: todos.status, n: count() })
@@ -30,6 +51,8 @@ export async function getAnalytics(db: Db, now: Date): Promise<Analytics> {
     total === 0 ? 0 : Math.round((doneCount / total) * 100) / 100;
 
   // ── 2. Scheduling split (open todos only) ──────────────────────────────────
+  // "scheduled" = todos placed on the calendar as time-blocks (scheduledStart).
+  // "unscheduled" = backlog: neither a block nor a reminder (matches the rail).
   const [scheduledRow] = await db
     .select({ n: count() })
     .from(todos)
@@ -38,7 +61,7 @@ export async function getAnalytics(db: Db, now: Date): Promise<Analytics> {
   const [unscheduledRow] = await db
     .select({ n: count() })
     .from(todos)
-    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart)));
+    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart), isNull(todos.remindAt)));
 
   // ── 3. byProject ──────────────────────────────────────────────────────────
   const projectList = await db.select().from(projects);
@@ -60,19 +83,24 @@ export async function getAnalytics(db: Db, now: Date): Promise<Analytics> {
     events: eventsByProject.find((r) => r.projectId === p.id)?.n ?? 0,
   }));
 
-  // ── 4. dumpsPerDay — last 14 days, zero-filled in TS ──────────────────────
-  const windowStart = new Date(now);
-  windowStart.setUTCDate(windowStart.getUTCDate() - 13);
-  windowStart.setUTCHours(0, 0, 0, 0);
+  const todayStr = localDateStr(now, timeZone);
+
+  // ── 4. dumpsPerDay — last 14 LOCAL days, zero-filled in TS ────────────────
+  // Over-inclusive UTC filter (start of today-14 in UTC ≤ local start of
+  // today-13 for any real zone); rows outside the window just miss the map.
+  const windowStart = new Date(`${stepDays(todayStr, -14)}T00:00:00Z`);
 
   const dumpsPerDayRaw = await db
     .select({
-      day: sql<string>`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')`,
+      day: sql<string>`to_char(created_at AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`,
       n: count(),
     })
     .from(dumps)
     .where(sql`created_at >= ${windowStart}`)
-    .groupBy(sql`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')`);
+    // GROUP BY ordinal: a parameterised AT TIME ZONE expression repeated in the
+    // GROUP BY is treated as a different param ($1 vs $3) and rejected, so group
+    // by the first output column instead.
+    .groupBy(sql`1`);
 
   const dumpsPerDayMap = new Map<string, number>(
     dumpsPerDayRaw.map((r) => [r.day, r.n]),
@@ -81,20 +109,18 @@ export async function getAnalytics(db: Db, now: Date): Promise<Analytics> {
   // Build array oldest → newest
   const dumpsPerDay: Array<{ day: string; count: number }> = [];
   for (let i = 13; i >= 0; i--) {
-    const d = new Date(now);
-    d.setUTCDate(d.getUTCDate() - i);
-    const dayStr = toUtcDateString(d);
+    const dayStr = stepDays(todayStr, -i);
     dumpsPerDay.push({ day: dayStr, count: dumpsPerDayMap.get(dayStr) ?? 0 });
   }
 
-  // ── 5. captureByHour — all dumps, 0..23, zero-filled in TS ───────────────
+  // ── 5. captureByHour — all dumps, 0..23 LOCAL, zero-filled in TS ──────────
   const captureByHourRaw = await db
     .select({
-      hour: sql<number>`EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int`,
+      hour: sql<number>`EXTRACT(HOUR FROM created_at AT TIME ZONE ${timeZone})::int`,
       n: count(),
     })
     .from(dumps)
-    .groupBy(sql`EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')`);
+    .groupBy(sql`1`);
 
   const captureByHourMap = new Map<number, number>(
     captureByHourRaw.map((r) => [r.hour, r.n]),
@@ -105,22 +131,21 @@ export async function getAnalytics(db: Db, now: Date): Promise<Analytics> {
     (_, h) => ({ hour: h, count: captureByHourMap.get(h) ?? 0 }),
   );
 
-  // ── 6. streakDays — walk back from today counting consecutive days ─────────
+  // ── 6. streakDays — walk back from today (local) counting consecutive days ─
   const dumpDatesRaw = await db
     .select({
-      day: sql<string>`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')`,
+      day: sql<string>`to_char(created_at AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`,
     })
     .from(dumps)
-    .groupBy(sql`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')`);
+    .groupBy(sql`1`);
 
   const dumpDatesSet = new Set<string>(dumpDatesRaw.map((r) => r.day));
 
   let streakDays = 0;
-  const cursor = new Date(now);
-  cursor.setUTCHours(0, 0, 0, 0);
-  while (dumpDatesSet.has(toUtcDateString(cursor))) {
+  let cursor = todayStr;
+  while (dumpDatesSet.has(cursor)) {
     streakDays++;
-    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    cursor = stepDays(cursor, -1);
   }
 
   // ── Result ─────────────────────────────────────────────────────────────────

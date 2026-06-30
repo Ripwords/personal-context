@@ -41,7 +41,15 @@ interface Analytics {
 
 // ── Data fetching ─────────────────────────────────────────────────────────
 
-const { data, status, error } = await useFetch<Analytics>("/api/analytics");
+// The user's IANA zone is only known on the client, so SSR fetches UTC and we
+// refetch with the real zone on mount (useFetch watches the reactive query).
+const tz = ref("UTC");
+const { data, status, error } = await useFetch<Analytics>("/api/analytics", {
+  query: { tz },
+});
+onMounted(() => {
+  tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+});
 
 // ── Derived helpers ───────────────────────────────────────────────────────
 
