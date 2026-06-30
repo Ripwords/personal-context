@@ -1,13 +1,13 @@
 import { defineEventHandler, getQuery, createError } from "h3";
 import { getDb } from "../../db/client";
 import { getAuthSession } from "../../utils/session";
-import { getCalendarFeed } from "../../db/queries/calendar-feed";
+import { syncConnectionsInRange } from "../../calendar-sync/sync-range";
 
 /**
- * Read-only calendar feed for [from, to). Returns the cached DB feed instantly —
- * it does NOT call Google, so scrolling the timeline never blocks on the network.
- * Google sync is a separate POST /api/calendar/sync the client fires in the
- * background (stale-while-revalidate).
+ * Sync Google calendars into the local DB for [from, to). Called by the client
+ * in the background after it has already painted the cached feed, so the network
+ * round-trip never blocks rendering. Returns once the window is synced; the
+ * client then re-reads the feed to pick up changes.
  */
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -20,5 +20,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "invalid from/to" });
   }
 
-  return getCalendarFeed(getDb(), from, to);
+  await syncConnectionsInRange(getDb(), process.env, from, to);
+  return { synced: true };
 });
