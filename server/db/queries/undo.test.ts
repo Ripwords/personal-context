@@ -1,9 +1,10 @@
 import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../test-helpers";
-import { createTodo, logActivity } from "./items";
+import { createTodo, createEvent, logActivity } from "./items";
 import { undoLastActivity } from "./undo";
 import { eq } from "drizzle-orm";
-import { todos, activities } from "../schema";
+import { GoogleApiError } from "../../calendar-sync/google-rest";
+import { todos, events, activities } from "../schema";
 
 const db = getTestDb();
 beforeEach(async () => {
@@ -63,4 +64,57 @@ test("undoLastActivity removes the latest (B), leaving the earlier (A)", async (
   // A should still exist
   const aRows = await db.select().from(todos).where(eq(todos.id, todoA.id));
   expect(aRows).toHaveLength(1);
+});
+
+test("undoLastActivity deletes the Google copy of a synced event and reports googleSync:synced", async () => {
+  const ev = await createEvent(db, {
+    title: "synced ev",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "gEv1",
+    googleAccountId: "acc1",
+    calendarId: "braindump",
+    syncStatus: "synced",
+  });
+  await logActivity(db, { action: "create", entityType: "event", entityId: ev.id });
+
+  const calls: { accountId: string; calendarId: string; eventId: string }[] = [];
+  const result = await undoLastActivity(db, {
+    deleteFromGoogle: async (input) => { calls.push(input); },
+  });
+
+  expect(result.undone).toBe(true);
+  expect(result.googleSync).toBe("synced");
+  expect(calls).toEqual([{ accountId: "acc1", calendarId: "braindump", eventId: "gEv1" }]);
+  // local row gone
+  expect(await db.select().from(events).where(eq(events.id, ev.id))).toHaveLength(0);
+});
+
+test("undoLastActivity still removes locally when Google delete fails (best-effort), reporting needs-reauth", async () => {
+  const ev = await createEvent(db, {
+    title: "synced ev", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "gEv2", googleAccountId: "acc1", calendarId: "braindump", syncStatus: "synced",
+  });
+  await logActivity(db, { action: "create", entityType: "event", entityId: ev.id });
+
+  const result = await undoLastActivity(db, {
+    deleteFromGoogle: async () => { throw new GoogleApiError(401, "unauthorized"); },
+  });
+
+  expect(result.undone).toBe(true); // local undo proceeds regardless
+  expect(result.googleSync).toBe("needs-reauth");
+  expect(await db.select().from(events).where(eq(events.id, ev.id))).toHaveLength(0);
+});
+
+test("undoLastActivity reports googleSync:off for a local-only event", async () => {
+  const ev = await createEvent(db, {
+    title: "local ev", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+  });
+  await logActivity(db, { action: "create", entityType: "event", entityId: ev.id });
+
+  let called = false;
+  const result = await undoLastActivity(db, { deleteFromGoogle: async () => { called = true; } });
+  expect(result.undone).toBe(true);
+  expect(result.googleSync).toBe("off");
+  expect(called).toBe(false);
 });
