@@ -7,16 +7,11 @@ export const todoToolSchema = z.object({
   title: z.string().describe("Short, actionable title for the todo item"),
   notes: z.string().optional().describe("Optional extra details or context"),
   project: z.string().optional().describe("Project name (exact match preferred) or omit if none fits"),
-  scheduledStart: z
+  remindAt: z
     .string()
     .datetime()
     .optional()
-    .describe("ISO 8601 datetime if the todo has a specific time (e.g. 'remind me at 2pm'); omit for anytime todos"),
-  scheduledEnd: z
-    .string()
-    .datetime()
-    .optional()
-    .describe("ISO 8601 end datetime; defaults to 30 min after scheduledStart if omitted"),
+    .describe("ISO 8601 REMINDER time. Set this ONLY for a reminder — a personal nudge the user wants to be notified about at a specific time (e.g. 'remind me to take meds at 8pm', 'ping me at 2'). A reminder fires a browser notification; it is NOT a calendar event and is never put on the calendar. Omit for plain checklist todos; a casually-mentioned day/time goes in notes, not here. If the user means a meeting/appointment/time-block, use create_event instead."),
   confidence: z.number().min(0).max(1).describe("Confidence 0..1 that this is a real actionable todo"),
 });
 
@@ -30,13 +25,17 @@ export const eventToolSchema = z.object({
 });
 
 export const deleteEventToolSchema = z.object({
-  title: z.string().describe("Words from the title of the EXISTING event to remove (case-insensitive substring)"),
+  id: z.string().optional().describe("Stable id from read_calendar for the item to remove. Prefer this over title."),
+  kind: z.enum(["event", "todo"]).optional().describe("Item kind from read_calendar when id is provided"),
+  title: z.string().optional().describe("Words from the title of the EXISTING calendar item to remove (case-insensitive substring), only if id is not known"),
   from: z.string().datetime().optional().describe("ISO 8601 start of the day/range to search, if a date was given"),
   to: z.string().datetime().optional().describe("ISO 8601 end of the day/range to search"),
 });
 
 export const updateEventToolSchema = z.object({
-  title: z.string().describe("Words from the title of the EXISTING event to modify (case-insensitive substring)"),
+  id: z.string().optional().describe("Stable id from read_calendar for the item to modify. Prefer this over title."),
+  kind: z.enum(["event", "todo"]).optional().describe("Item kind from read_calendar when id is provided"),
+  title: z.string().optional().describe("Words from the title of the EXISTING calendar item to modify (case-insensitive substring), only if id is not known"),
   from: z.string().datetime().optional().describe("ISO 8601 start of the day/range to find the event"),
   to: z.string().datetime().optional().describe("ISO 8601 end of the day/range to find the event"),
   newTitle: z.string().optional().describe("New title, if renaming"),
@@ -65,13 +64,13 @@ export const createEventTool = tool({
 
 export const deleteEventTool = tool({
   description:
-    "Remove/cancel/delete an EXISTING calendar event the user asks to get rid of. Match by title (and date if given). Use this for 'remove', 'cancel', 'delete', 'drop' — never create an event for a removal request.",
+    "Remove/cancel/delete an EXISTING calendar item the user asks to get rid of. Prefer id+kind from read_calendar; otherwise match by title/date. Use this for 'remove', 'cancel', 'delete', 'drop' — never create an event for a removal request.",
   inputSchema: deleteEventToolSchema,
 });
 
 export const updateEventTool = tool({
   description:
-    "Modify an EXISTING calendar event — rename it or reschedule it. Use this for 'move', 'reschedule', 'rename', 'change' requests. Find by title, then set the new title and/or new start/end.",
+    "Modify an EXISTING calendar item — rename it or reschedule it. Prefer id+kind from read_calendar; otherwise find by title, then set the new title and/or new start/end.",
   inputSchema: updateEventToolSchema,
 });
 

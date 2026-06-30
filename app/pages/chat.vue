@@ -53,6 +53,16 @@ function googleSyncNote(sync: GoogleSync | undefined): string {
 }
 
 interface CalendarEvent {
+  id: string;
+  kind: "event";
+  title: string;
+  startsAt: string;
+  endsAt: string;
+}
+
+interface ScheduledTodoCalendarItem {
+  id: string;
+  kind: "todo";
   title: string;
   startsAt: string;
   endsAt: string;
@@ -60,25 +70,35 @@ interface CalendarEvent {
 
 interface ReadCalendarOutput {
   events: CalendarEvent[];
-  scheduledTodos: { title: string }[];
-  unscheduledTodos: { title: string }[];
+  scheduledTodos: ScheduledTodoCalendarItem[];
+  unscheduledTodos: { id: string; kind: "todo"; title: string }[];
   error?: string;
 }
 
 interface DeleteEventOutput {
   deleted: boolean;
+  id?: string;
+  kind?: "event" | "todo";
   title?: string;
-  reason?: "not-found" | "ambiguous";
+  startsAt?: string;
+  endsAt?: string;
+  googleSync?: GoogleSync;
+  reason?: "not-found" | "ambiguous" | "missing-target" | "invalid-date" | "needs-reauth" | "not-synced";
   query?: string;
-  matches?: { title: string; startsAt: string }[];
+  matches?: { id: string; kind: "event" | "todo"; title: string; startsAt: string; endsAt: string }[];
 }
 
 interface UpdateEventOutput {
   updated: boolean;
+  id?: string;
+  kind?: "event" | "todo";
   title?: string;
-  reason?: "not-found" | "ambiguous";
+  startsAt?: string;
+  endsAt?: string;
+  googleSync?: GoogleSync;
+  reason?: "not-found" | "ambiguous" | "missing-target" | "invalid-date" | "needs-reauth" | "not-synced";
   query?: string;
-  matches?: { title: string; startsAt: string }[];
+  matches?: { id: string; kind: "event" | "todo"; title: string; startsAt: string; endsAt: string }[];
 }
 
 // ── Typed tool part ───────────────────────────────────────────────────────────
@@ -369,21 +389,7 @@ function formatTime(iso: string): string {
     <!-- Main content -->
     <div class="flex-1 flex flex-col min-w-0">
     <!-- Header -->
-    <header
-      class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0"
-    >
-      <NuxtLink
-        to="/"
-        class="text-sm bd-faint hover:text-[var(--bd-text)] focus-visible:outline-none
-               focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
-               motion-safe:transition-colors"
-        aria-label="Back to calendar"
-      >
-        ← Calendar
-      </NuxtLink>
-      <h1 class="text-sm font-medium bd-muted select-none">Chat</h1>
-      <span class="w-16" aria-hidden="true" />
-    </header>
+    <AppHeader title="Chat" />
 
     <!-- Message list -->
     <main
@@ -542,8 +548,17 @@ function formatTime(iso: string): string {
                 <p v-else-if="asDeleteEvent(tp.output).reason === 'not-found'" class="text-xs bd-faint px-1">
                   · no event matching “{{ asDeleteEvent(tp.output).query }}”
                 </p>
+                <p
+                  v-else-if="asDeleteEvent(tp.output).reason === 'needs-reauth' || asDeleteEvent(tp.output).reason === 'not-synced'"
+                  class="text-xs bd-faint px-1"
+                >
+                  · not removed from Google — reconnect Google or retry
+                </p>
+                <p v-else-if="asDeleteEvent(tp.output).reason === 'missing-target'" class="text-xs bd-faint px-1">
+                  · missing event to remove
+                </p>
                 <p v-else class="text-xs bd-faint px-1">
-                  · multiple matches — which one? {{ (asDeleteEvent(tp.output).matches ?? []).map((m) => m.title).join(", ") }}
+                  · multiple matches — which one? {{ (asDeleteEvent(tp.output).matches ?? []).map((m) => `${m.title} (${m.startsAt})`).join(", ") }}
                 </p>
               </template>
 
@@ -555,8 +570,20 @@ function formatTime(iso: string): string {
                 <p v-else-if="asUpdateEvent(tp.output).reason === 'not-found'" class="text-xs bd-faint px-1">
                   · no event matching “{{ asUpdateEvent(tp.output).query }}”
                 </p>
+                <p
+                  v-else-if="asUpdateEvent(tp.output).reason === 'needs-reauth' || asUpdateEvent(tp.output).reason === 'not-synced'"
+                  class="text-xs bd-faint px-1"
+                >
+                  · not updated in Google — reconnect Google or retry
+                </p>
+                <p v-else-if="asUpdateEvent(tp.output).reason === 'invalid-date'" class="text-xs bd-faint px-1">
+                  · not updated: end time must be after start time
+                </p>
+                <p v-else-if="asUpdateEvent(tp.output).reason === 'missing-target'" class="text-xs bd-faint px-1">
+                  · missing event to update
+                </p>
                 <p v-else class="text-xs bd-faint px-1">
-                  · multiple matches — which one? {{ (asUpdateEvent(tp.output).matches ?? []).map((m) => m.title).join(", ") }}
+                  · multiple matches — which one? {{ (asUpdateEvent(tp.output).matches ?? []).map((m) => `${m.title} (${m.startsAt})`).join(", ") }}
                 </p>
               </template>
 

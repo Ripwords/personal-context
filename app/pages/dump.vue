@@ -9,6 +9,13 @@ interface CreatedItem {
   projectId: string | null;
   confidence: number | null;
   lowConfidence: boolean;
+  needsReview: boolean;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface DumpResult {
@@ -22,6 +29,20 @@ interface DumpResult {
 }
 
 const toast = useToast();
+
+// Projects for one-tap correction of low-confidence tags.
+const { data: projects } = await useFetch<ProjectOption[]>("/api/projects", { default: () => [] });
+
+/** Correct (or confirm) a todo's project from the extracted-items list. */
+async function correctProject(item: CreatedItem, projectId: string | null): Promise<void> {
+  try {
+    await $fetch(`/api/todos/${item.id}/project`, { method: "PATCH", body: { projectId } });
+    item.projectId = projectId;
+    item.needsReview = false;
+  } catch {
+    toast.add({ title: "Couldn't update project", color: "error" });
+  }
+}
 
 const text = ref<string>("");
 const loading = ref<boolean>(false);
@@ -82,19 +103,7 @@ async function capture(): Promise<void> {
 <template>
   <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
-    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
-      <NuxtLink
-        to="/"
-        class="text-sm bd-faint hover:text-[var(--bd-text)]
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
-               motion-safe:transition-colors"
-        aria-label="Back to calendar"
-      >
-        ← Calendar
-      </NuxtLink>
-      <h1 class="text-sm font-medium bd-muted">Braindump</h1>
-      <div class="w-20" aria-hidden="true" />
-    </header>
+    <AppHeader title="Brain dump" />
 
     <!-- Body -->
     <main class="flex-1 flex flex-col items-center px-4 py-10 gap-8 max-w-2xl mx-auto w-full">
@@ -132,8 +141,8 @@ async function capture(): Promise<void> {
           <button
             type="button"
             :disabled="loading || !text.trim()"
-            class="px-4 py-2 rounded text-sm font-medium bg-neutral-700 text-white
-                   hover:bg-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed
+            class="px-4 py-2 rounded text-sm font-medium bg-[var(--bd-surface-2)] bd-text
+                   hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed
                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bd-bg)]
                    motion-safe:transition-colors"
             @click="capture"
@@ -170,9 +179,26 @@ async function capture(): Promise<void> {
             <!-- Title -->
             <span class="flex-1 text-sm bd-text truncate">{{ item.title }}</span>
 
-            <!-- Low-confidence tag -->
+            <!-- One-tap project correction for flagged todos -->
+            <div v-if="item.needsReview && item.kind === 'todo'" class="shrink-0 flex items-center gap-1">
+              <span class="text-[10px] font-medium text-amber-500 italic" title="AI was less certain about this tag">
+                review tag
+              </span>
+              <select
+                class="text-[11px] bd-text bd-surface-2 border bd-border rounded px-1 py-0.5
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
+                :value="item.projectId ?? ''"
+                :aria-label="`Project for ${item.title}`"
+                @change="correctProject(item, ($event.target as HTMLSelectElement).value || null)"
+              >
+                <option value="">No project</option>
+                <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </select>
+            </div>
+
+            <!-- Low-confidence tag (events / already-confirmed) -->
             <span
-              v-if="item.lowConfidence"
+              v-else-if="item.lowConfidence"
               class="shrink-0 text-[10px] font-medium bd-faint italic"
               title="AI was less certain about this item"
             >

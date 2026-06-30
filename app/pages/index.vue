@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import type { Project } from "~/components/ProjectRail.vue";
 import type CalendarTimeline from "~/components/CalendarTimeline.vue";
+import CalendarDayView from "~/components/CalendarDayView.vue";
+import CalendarMonthView from "~/components/CalendarMonthView.vue";
 import { useCalendarFeed } from "~/composables/useCalendarFeed";
+import { startOfWeek, addDays } from "~/composables/useWeek";
 import { authClient } from "~/lib/auth-client";
 
 // ── Calendar: lazily-loaded feed feeding the smooth-scrolling timeline ─────
@@ -37,6 +40,25 @@ const { data: projectsData } = await useFetch<Project[]>("/api/projects", {
 
 const projects = computed<Project[]>(() => projectsData.value ?? []);
 const activeProjectIds = ref<Set<string>>(new Set());
+
+// ── Reminders (timed todos — notify instead of occupying the calendar) ──────
+interface Reminder { id: string; title: string; remindAt: string }
+const { data: remindersData, refresh: refreshReminders } = await useFetch<Reminder[]>("/api/reminders", {
+  default: () => [] as Reminder[],
+  onResponseError() { /* rail tolerates an empty list */ },
+});
+const reminders = computed<Reminder[]>(() => remindersData.value ?? []);
+
+function formatReminderTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+
+// After any AI change (copilot/dump) refresh both the calendar and the reminders.
+async function refreshAll(): Promise<void> {
+  await Promise.all([reload(), refreshReminders()]);
+}
 
 function toggleProject(id: string): void {
   const next = new Set(activeProjectIds.value);
@@ -75,6 +97,70 @@ async function dropTodo(id: string): Promise<void> {
   await reload();
 }
 
+async function completeTodo(id: string): Promise<void> {
+  await $fetch(`/api/todos/${id}/complete`, { method: "POST", body: { done: true } });
+  await reload();
+}
+
+// ── Day / month views ──────────────────────────────────────────────────────
+const now = ref<Date>(new Date());
+
+/** UTC-midnight marker for centerDate's local calendar date (day view + columns). */
+const dayMarker = computed(() => {
+  const d = centerDate.value;
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+});
+
+const dayLabel = computed(() =>
+  centerDate.value.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
+);
+const monthLabel = computed(() =>
+  centerDate.value.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+);
+
+function shiftDay(delta: number): void {
+  const d = centerDate.value;
+  centerDate.value = new Date(d.getFullYear(), d.getMonth(), d.getDate() + delta);
+}
+function shiftMonth(delta: number): void {
+  const d = centerDate.value;
+  centerDate.value = new Date(d.getFullYear(), d.getMonth() + delta, 1);
+}
+function goToday(): void {
+  centerDate.value = new Date();
+}
+function openDay(day: Date): void {
+  centerDate.value = day;
+  viewMode.value = "day";
+}
+
+/** Monday markers (UTC) covering the weeks the current day/month view spans. */
+const visibleMondays = computed<Date[]>(() => {
+  if (viewMode.value === "day") return [startOfWeek(dayMarker.value)];
+  if (viewMode.value === "month") {
+    const first = new Date(Date.UTC(centerDate.value.getFullYear(), centerDate.value.getMonth(), 1));
+    const gridStart = startOfWeek(first);
+    return Array.from({ length: 6 }, (_, i) => addDays(gridStart, i * 7));
+  }
+  return [];
+});
+
+// Day/month views read from the same lazily-loaded feed, so make sure the weeks
+// they show are fetched (the week timeline loads its own via the scroll handler).
+watch(
+  [viewMode, visibleMondays],
+  () => { if (viewMode.value !== "week") ensureWeeks(visibleMondays.value); },
+  { immediate: true },
+);
+
+async function scheduleTodo(payload: { id: string; startsAt: string; endsAt: string }): Promise<void> {
+  await $fetch(`/api/todos/${payload.id}/schedule`, {
+    method: "POST",
+    body: { ...payload, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  });
+  await reload();
+}
+
 async function clearUnscheduled(): Promise<void> {
   await $fetch("/api/todos/clear-unscheduled", { method: "POST" });
   await reload();
@@ -106,7 +192,7 @@ async function submitDump(): Promise<void> {
       body: { text, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     });
     dumpText.value = "";
-    await reload();
+    await refreshAll();
     const todos = res.created.filter((c) => c.kind === "todo").length;
     const events = res.created.filter((c) => c.kind === "event").length;
     const parts: string[] = [];
@@ -138,17 +224,7 @@ async function submitDump(): Promise<void> {
   }
 }
 
-// ── Header / overflow menu ──────────────────────────────────────────────────
-
-const menuOpen = ref(false);
-const navLinks = [
-  { to: "/chat", label: "Chat" },
-  { to: "/wind-down", label: "Wind down" },
-  { to: "/memories", label: "Memory" },
-  { to: "/documents", label: "Documents" },
-  { to: "/analytics", label: "Analytics" },
-  { to: "/settings", label: "Settings" },
-];
+// ── Sign-out (also used by the "not synced" reauth toast action) ────────────
 
 async function handleSignOut(): Promise<void> {
   await authClient.signOut();
@@ -222,28 +298,8 @@ const monthTitle = computed(() =>
         >{{ mode }}</button>
       </div>
 
-      <!-- Overflow menu -->
-      <div class="relative shrink-0">
-        <button
-          type="button" aria-label="Menu" @click="menuOpen = !menuOpen"
-          class="w-8 h-8 flex items-center justify-center rounded-full bd-surface-2 bd-text text-sm
-                 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
-        >⋯</button>
-        <template v-if="menuOpen">
-          <div class="fixed inset-0 z-10" @click="menuOpen = false" />
-          <div class="absolute right-0 mt-1 w-44 z-20 rounded-lg border bd-border bd-surface py-1 shadow-xl shadow-black/40">
-            <NuxtLink
-              v-for="l in navLinks" :key="l.to" :to="l.to" @click="menuOpen = false"
-              class="block px-3 py-1.5 text-sm bd-muted hover:text-[var(--bd-text)] bd-hover motion-safe:transition-colors"
-            >{{ l.label }}</NuxtLink>
-            <div class="my-1 border-t bd-border" />
-            <button
-              type="button" @click="handleSignOut"
-              class="block w-full text-left px-3 py-1.5 text-sm bd-muted hover:text-[var(--bd-text)] bd-hover motion-safe:transition-colors"
-            >Sign out</button>
-          </div>
-        </template>
-      </div>
+      <!-- Overflow / navigation menu -->
+      <AppNavMenu />
     </header>
 
     <!-- ── Three-pane body ─────────────────────────────────────────────────── -->
@@ -291,23 +347,75 @@ const monthTitle = computed(() =>
         </template>
 
         <template v-else-if="viewMode === 'day'">
-          <div class="flex-1 flex items-center justify-center text-sm bd-faint">Day view coming soon.</div>
+          <div class="flex items-center justify-between px-3 py-2 border-b bd-border shrink-0">
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftDay(-1)">‹</button>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium bd-text">{{ dayLabel }}</span>
+              <button type="button" class="px-2 h-6 text-[11px] rounded border bd-border bd-faint bd-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="goToday">Today</button>
+            </div>
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftDay(1)">›</button>
+          </div>
+          <CalendarDayView
+            :day="dayMarker"
+            :events="events"
+            :scheduled-todos="scheduledTodos"
+            :project-color-map="projectColorMap"
+            :today="now"
+            @schedule-todo="scheduleTodo"
+          />
         </template>
 
         <template v-else>
-          <div class="flex-1 flex items-center justify-center text-sm bd-faint">Month view coming soon.</div>
+          <div class="flex items-center justify-between px-3 py-2 border-b bd-border shrink-0">
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftMonth(-1)">‹</button>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium bd-text">{{ monthLabel }}</span>
+              <button type="button" class="px-2 h-6 text-[11px] rounded border bd-border bd-faint bd-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="goToday">Today</button>
+            </div>
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftMonth(1)">›</button>
+          </div>
+          <CalendarMonthView
+            :month-anchor="centerDate"
+            :events="events"
+            :scheduled-todos="scheduledTodos"
+            :project-color-map="projectColorMap"
+            :today="now"
+            @select-day="openDay"
+          />
         </template>
       </main>
 
-      <!-- Right rail: unscheduled todos -->
-      <aside class="w-56 shrink-0 border-l bd-border bd-surface overflow-y-auto">
+      <!-- Right rail: reminders + unscheduled todos -->
+      <aside class="w-56 shrink-0 border-l bd-border bd-surface overflow-y-auto flex flex-col">
+        <!-- Reminders (timed todos) — notify, never gridded -->
+        <section v-if="reminders.length > 0" class="border-b bd-border p-3 flex flex-col gap-2">
+          <h2 class="text-[11px] font-semibold tracking-widest uppercase bd-faint">Reminders</h2>
+          <ul class="flex flex-col gap-1">
+            <li
+              v-for="r in reminders"
+              :key="r.id"
+              class="flex items-start gap-2 px-2 py-1.5 rounded border bd-border bd-bg"
+            >
+              <span aria-hidden="true" class="text-xs leading-5">🔔</span>
+              <div class="flex flex-col min-w-0">
+                <span class="text-sm bd-text truncate">{{ r.title }}</span>
+                <span class="text-[11px] bd-faint tabular-nums">{{ formatReminderTime(r.remindAt) }}</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
         <UnscheduledRail
           :todos="unscheduledTodos"
           :project-color-map="projectColorMap"
           @drop="dropTodo"
+          @complete="completeTodo"
           @clear-all="clearUnscheduled"
         />
       </aside>
     </div>
+
+    <!-- Conversational copilot — refreshes the timeline + reminders after any change -->
+    <CalendarCopilot @changed="refreshAll" />
   </div>
 </template>

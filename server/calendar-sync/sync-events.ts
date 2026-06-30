@@ -1,6 +1,6 @@
 // server/calendar-sync/sync-events.ts
-import { eq } from "drizzle-orm";
-import { type Db } from "../db/client";
+import { and, eq, gt, isNotNull, lt, notInArray, sql } from "drizzle-orm";
+import { type Db, type DbOrTx } from "../db/client";
 import { events, googleCalendar, type NewEventRow } from "../db/schema";
 import type { GoogleCreds } from "../auth/google-credentials";
 
@@ -9,6 +9,8 @@ export type RawGoogleEvent = {
   summary?: string;
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
+  /** Google's RFC3339 last-modification time; drives last-write-wins. */
+  updated?: string;
 };
 
 export type RawGoogleCalendar = {
@@ -51,6 +53,7 @@ export function normalizeEvent(
   if (!startsAt || !endsAt) return null;
   // Google all-day events carry `start.date` (no `start.dateTime`).
   const allDay = !raw.start?.dateTime && !!raw.start?.date;
+  const googleUpdatedAt = raw.updated ? new Date(raw.updated) : null;
   return {
     title: raw.summary ?? "(no title)",
     startsAt,
@@ -60,7 +63,42 @@ export function normalizeEvent(
     calendarId,
     allDay,
     syncStatus: "synced",
+    googleUpdatedAt: googleUpdatedAt && !Number.isNaN(googleUpdatedAt.getTime()) ? googleUpdatedAt : null,
+    // A freshly synced row's last modification IS Google's update time, so a
+    // later local edit (which bumps updatedAt to "now") wins over re-syncs of
+    // this same Google version.
+    updatedAt: googleUpdatedAt && !Number.isNaN(googleUpdatedAt.getTime()) ? googleUpdatedAt : undefined,
   };
+}
+
+/**
+ * Reflect Google-side deletions locally: remove previously-synced rows in this
+ * calendar+window whose Google copy is no longer present. Scoped tightly so we
+ * never touch local-only events (syncStatus 'local', no googleEventId) or events
+ * outside the queried window — an empty `presentIds` means Google returned
+ * nothing for the window, so every synced row in it should go.
+ */
+async function reconcileDeletions(
+  tx: DbOrTx,
+  accountId: string,
+  calendarId: string,
+  from: Date,
+  to: Date,
+  presentIds: string[],
+): Promise<void> {
+  const conditions = [
+    eq(events.googleAccountId, accountId),
+    eq(events.calendarId, calendarId),
+    eq(events.syncStatus, "synced"),
+    isNotNull(events.googleEventId),
+    // Overlap, not start-within: Google's list (timeMin/timeMax) returns events
+    // that overlap the window, so reconciliation must scope the same way or
+    // spanning/multi-day rows are never matched against `presentIds`.
+    lt(events.startsAt, to),
+    gt(events.endsAt, from),
+  ];
+  if (presentIds.length > 0) conditions.push(notInArray(events.googleEventId, presentIds));
+  await tx.delete(events).where(and(...conditions));
 }
 
 export async function syncConnectionEvents(
@@ -78,14 +116,17 @@ export async function syncConnectionEvents(
     timeMin: from.toISOString(),
     timeMax: to.toISOString(),
   });
+  // Every id Google returned for the window — the deletion reconciler keeps these.
+  const presentIds = raw.map((e) => e.id);
   const rows = raw
     .map((e) => normalizeEvent(e, conn.accountId, calendarId))
     .filter((r): r is NewEventRow => r !== null);
-  if (rows.length === 0) return 0;
 
-  // node-postgres supports interactive transactions — wrap the upserts so a
-  // sync either fully lands or rolls back.
+  // node-postgres supports interactive transactions — reconcile deletions and
+  // upsert together so a sync either fully lands or rolls back. Reconciliation
+  // runs even when Google returns nothing, so a fully-cleared window clears here.
   await db.transaction(async (tx) => {
+    await reconcileDeletions(tx, conn.accountId, calendarId, from, to, presentIds);
     for (const row of rows) {
       await tx
         .insert(events)
@@ -99,7 +140,17 @@ export async function syncConnectionEvents(
             calendarId: row.calendarId,
             allDay: row.allDay,
             syncStatus: "synced",
+            googleUpdatedAt: row.googleUpdatedAt,
+            updatedAt: row.updatedAt ?? sql`now()`,
           },
+          // Last-write-wins: only apply Google's version when its change is
+          // strictly newer than the row's last modification. A just-made local
+          // edit bumped updatedAt to "now", so a stale Google copy can't clobber
+          // it; a genuinely newer Google edit still wins. When Google sends no
+          // `updated`, fall back to overwriting (no basis to prefer local).
+          setWhere: row.googleUpdatedAt
+            ? sql`${events.updatedAt} is null or ${row.googleUpdatedAt} > ${events.updatedAt}`
+            : undefined,
         });
     }
   });
@@ -157,9 +208,22 @@ export async function syncAllCalendars(
   let total = 0;
   for (const cal of calendars) {
     if (!visibleIds.has(cal.id)) continue;
-    // The Braindump calendar is write-only from the app's side — the AI items it
-    // holds already live locally, so reading them back would double them up.
-    if (conn.braindumpCalendarId && cal.id === conn.braindumpCalendarId) continue;
+    // The Braindump calendar's content is write-only from the app's side — its
+    // AI items already live locally, so reading them back would double them up.
+    // We still reconcile *deletions* (deletion-only, no insert) so removing an AI
+    // event in another client removes it here too.
+    if (conn.braindumpCalendarId && cal.id === conn.braindumpCalendarId) {
+      const raw = await eventsApi.list({
+        accessToken,
+        calendarId: cal.id,
+        timeMin: from.toISOString(),
+        timeMax: to.toISOString(),
+      });
+      await db.transaction((tx) =>
+        reconcileDeletions(tx, conn.accountId, cal.id, from, to, raw.map((e) => e.id)),
+      );
+      continue;
+    }
     total += await syncConnectionEvents(db, conn, accessToken, eventsApi, from, to, cal.id);
   }
   return total;

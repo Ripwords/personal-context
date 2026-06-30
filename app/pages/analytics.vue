@@ -41,7 +41,15 @@ interface Analytics {
 
 // ── Data fetching ─────────────────────────────────────────────────────────
 
-const { data, status, error } = await useFetch<Analytics>("/api/analytics");
+// The user's IANA zone is only known on the client, so SSR fetches UTC and we
+// refetch with the real zone on mount (useFetch watches the reactive query).
+const tz = ref("UTC");
+const { data, status, error } = await useFetch<Analytics>("/api/analytics", {
+  query: { tz },
+});
+onMounted(() => {
+  tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+});
 
 // ── Derived helpers ───────────────────────────────────────────────────────
 
@@ -83,19 +91,7 @@ function formatDay(iso: string): string {
 <template>
   <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- ── Header ─────────────────────────────────────────────────────── -->
-    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
-      <NuxtLink
-        to="/"
-        class="text-sm bd-faint hover:text-[var(--bd-text)] rounded
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500
-               motion-safe:transition-colors"
-        aria-label="Back to calendar"
-      >
-        ← Calendar
-      </NuxtLink>
-      <h1 class="text-sm font-medium bd-muted">Analytics</h1>
-      <div class="w-20" aria-hidden="true" />
-    </header>
+    <AppHeader title="Analytics" />
 
     <!-- ── Loading ───────────────────────────────────────────────────── -->
     <div
@@ -166,7 +162,7 @@ function formatDay(iso: string): string {
           <!-- Second row: scheduling + streak -->
           <div class="mt-px grid grid-cols-2 sm:grid-cols-3 gap-px border bd-border bg-[var(--bd-border)] rounded overflow-hidden mt-2">
             <div class="bd-bg px-4 py-4 flex flex-col gap-1">
-              <span class="text-xs bd-faint uppercase tracking-widest">Scheduled</span>
+              <span class="text-xs bd-faint uppercase tracking-widest">Reminders</span>
               <span class="text-2xl font-semibold tabular-nums bd-text">
                 {{ data?.scheduling.scheduled ?? 0 }}
               </span>

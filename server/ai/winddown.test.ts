@@ -1,6 +1,6 @@
 import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../db/test-helpers";
-import { createTodo, listActivity } from "../db/queries/items";
+import { createTodo, listActivity, listScheduledTodosInRange, listUnscheduledTodos } from "../db/queries/items";
 import { applyWindDownSchedule, type WindDownProposal } from "./winddown";
 import type { LanguageModel } from "ai";
 import type { Db } from "../db/client";
@@ -14,7 +14,7 @@ beforeEach(async () => {
   await truncateAll(db);
 });
 
-test("applyWindDownSchedule: schedules valid block and skips invalid date block", async () => {
+test("applyWindDownSchedule: creates a calendar event for a valid block, skips invalid date block", async () => {
   // Create 2 open todos
   const todo1 = await createTodo(db, { title: "Write quarterly report", source: "manual" });
   const todo2 = await createTodo(db, { title: "Review pull requests", source: "manual" });
@@ -32,29 +32,25 @@ test("applyWindDownSchedule: schedules valid block and skips invalid date block"
     },
   ];
 
-  const count = await applyWindDownSchedule(db, blocks);
+  const created = await applyWindDownSchedule(db, blocks);
 
-  // Only 1 block should have been applied (the valid one)
-  expect(count).toBe(1);
+  // Only the valid block schedules its todo.
+  expect(created).toHaveLength(1);
+  expect(created[0]!.title).toBe("Write quarterly report");
+  expect(created[0]!.id).toBe(todo1.id); // the todo IS the block (not a new event row)
 
-  // Verify todo1 was scheduled correctly
-  const [scheduled] = await db.query.todos.findMany({
-    where: (t, { eq }) => eq(t.id, todo1.id),
-  });
-  expect(scheduled!.scheduledStart).not.toBeNull();
-  expect(scheduled!.scheduledStart!.toISOString()).toBe("2026-06-30T09:00:00.000Z");
-  expect(scheduled!.scheduledEnd).not.toBeNull();
-  expect(scheduled!.scheduledEnd!.toISOString()).toBe("2026-06-30T10:00:00.000Z");
+  // The scheduled todo becomes a calendar block; no separate event row is made.
+  const scheduled = await listScheduledTodosInRange(db, new Date("2026-06-30T00:00:00Z"), new Date("2026-07-01T00:00:00Z"));
+  expect(scheduled.map((t) => t.title)).toEqual(["Write quarterly report"]);
+  expect(scheduled[0]!.scheduledStart!.toISOString()).toBe("2026-06-30T09:00:00.000Z");
+  expect(scheduled[0]!.scheduledEnd!.toISOString()).toBe("2026-06-30T10:00:00.000Z");
 
-  // Verify todo2 was NOT scheduled (invalid date was skipped)
-  const [unscheduled] = await db.query.todos.findMany({
-    where: (t, { eq }) => eq(t.id, todo2.id),
-  });
-  expect(unscheduled!.scheduledStart).toBeNull();
-  expect(unscheduled!.scheduledEnd).toBeNull();
+  // The scheduled todo leaves the backlog; the unscheduled one stays.
+  const open = await listUnscheduledTodos(db);
+  expect(open.map((t) => t.title)).toEqual(["Review pull requests"]);
 });
 
-test("applyWindDownSchedule: logs an activity row with action=schedule for each valid block", async () => {
+test("applyWindDownSchedule: logs an activity row with action=schedule for each created event", async () => {
   const todo = await createTodo(db, { title: "Prepare slides", source: "manual" });
 
   const blocks = [
@@ -73,6 +69,7 @@ test("applyWindDownSchedule: logs an activity row with action=schedule for each 
   expect(activities[0]!.entityType).toBe("todo");
   expect(activities[0]!.entityId).toBe(todo.id);
   expect(activities[0]!.payload).toEqual({
+    todoId: todo.id,
     startsAt: "2026-06-30T14:00:00.000Z",
     endsAt: "2026-06-30T15:00:00.000Z",
   });
@@ -86,8 +83,8 @@ test("applyWindDownSchedule: returns 0 when all blocks have invalid dates", asyn
     { todoId: todo.id, startsAt: "2026-06-30T09:00:00Z", endsAt: "nope" },
   ];
 
-  const count = await applyWindDownSchedule(db, blocks);
-  expect(count).toBe(0);
+  const created = await applyWindDownSchedule(db, blocks);
+  expect(created).toHaveLength(0);
 
   const activities = await listActivity(db);
   expect(activities).toHaveLength(0);

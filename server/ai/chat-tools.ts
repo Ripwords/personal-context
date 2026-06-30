@@ -7,40 +7,29 @@ import { searchMemories } from "../db/queries/memory";
 import { searchDocuments } from "../db/queries/documents";
 import { getCalendarFeed } from "../db/queries/calendar-feed";
 import { makeWebSearch } from "./web-search";
-import { createTodoFromInput, createEventFromInput } from "./extract";
-import { findEventsByTitle, deleteEvent, updateEvent } from "../db/queries/items";
+import { createTodoFromInput, createEventFromInput, createKey } from "./extract";
+import { findCalendarItemsByTitle, resolveCalendarItemById, type CalendarItemKind, type CalendarItemTarget } from "../db/queries/items";
 import { todoToolSchema, eventToolSchema, updateEventToolSchema } from "./tools";
 import type { WritebackItem } from "../calendar-sync/writeback";
 import { isAuthError } from "../calendar-sync/google-rest";
+import {
+  calendarItemSummary,
+  deleteCalendarItem,
+  updateCalendarItem,
+  type CalendarMutationDeps,
+  type DeleteFromGoogleFn,
+  type GoogleSync,
+  type UpdateInGoogleFn,
+} from "../calendar-sync/mutations";
 
 /** Mirror an AI-created item to the user's Braindump Google calendar (best-effort). */
 export type MirrorFn = (item: WritebackItem) => Promise<void>;
-
-/** Delete an event from Google (its source calendar/account). Best-effort. */
-export type DeleteFromGoogleFn = (input: {
-  accountId: string;
-  calendarId: string;
-  eventId: string;
-}) => Promise<void>;
-
-/** Patch an event in Google (its source calendar/account). Best-effort. */
-export type UpdateInGoogleFn = (input: {
-  accountId: string;
-  calendarId: string;
-  eventId: string;
-  title?: string;
-  startsAt?: Date;
-  endsAt?: Date;
-}) => Promise<void>;
 
 export interface ChatToolDeps {
   mirror?: MirrorFn;
   deleteFromGoogle?: DeleteFromGoogleFn;
   updateInGoogle?: UpdateInGoogleFn;
 }
-
-/** Result of a best-effort Google mirror, surfaced to the chat UI. */
-export type GoogleSync = "synced" | "needs-reauth" | "not-synced" | "off";
 
 /**
  * Build the AI SDK v7 tool set for the chat flow.
@@ -56,6 +45,13 @@ export function makeChatTools(
   deps: ChatToolDeps = {},
 ): ToolSet {
   const { mirror, deleteFromGoogle, updateInGoogle } = deps;
+  const mutationDeps: CalendarMutationDeps = { deleteFromGoogle, updateInGoogle };
+
+  // Guardrail: within a single chat request, a model may call create_event /
+  // create_todo more than once for the same item (same title + time slot).
+  // Remember the first successful result per slot and replay it instead of
+  // inserting a duplicate row + re-mirroring to Google.
+  const createdBySlot = new Map<string, { id: string; title: string; googleSync: GoogleSync }>();
 
   // Mirror to Google without ever failing the tool call; report the outcome.
   async function safeMirror(item: WritebackItem): Promise<GoogleSync> {
@@ -69,24 +65,62 @@ export function makeChatTools(
     }
   }
 
+  function validDate(value: string | undefined): Date | undefined {
+    if (!value) return undefined;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  async function resolveTarget(input: {
+    id?: string;
+    kind?: CalendarItemKind;
+    title?: string;
+    from?: string;
+    to?: string;
+  }): Promise<
+    | { ok: true; target: CalendarItemTarget }
+    | { ok: false; reason: "not-found" | "ambiguous" | "missing-target"; query?: string; matches?: ReturnType<typeof calendarItemSummary>[] }
+  > {
+    if (input.id) {
+      if (!input.kind) return { ok: false, reason: "missing-target", query: input.id };
+      const target = await resolveCalendarItemById(db, input.kind, input.id);
+      return target ? { ok: true, target } : { ok: false, reason: "not-found", query: input.id };
+    }
+    if (!input.title?.trim()) return { ok: false, reason: "missing-target" };
+    const matches = await findCalendarItemsByTitle(
+      db,
+      input.title,
+      validDate(input.from),
+      validDate(input.to),
+    );
+    if (matches.length === 0) return { ok: false, reason: "not-found", query: input.title };
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        reason: "ambiguous",
+        matches: matches.map(calendarItemSummary),
+      };
+    }
+    return { ok: true, target: matches[0]! };
+  }
+
   return {
     create_todo: tool({
       description:
         "Create a concrete actionable todo item. Resolve the project name if provided.",
       inputSchema: todoToolSchema,
       execute: async (inp) => {
+        const slot = createKey("todo", inp.title, inp.remindAt);
+        const prior = createdBySlot.get(slot);
+        if (prior) return { created: "todo" as const, ...prior, duplicate: true };
+
         const projects = await listProjects(db);
         const item = await createTodoFromInput(db, inp, projects, null);
-        // A timed reminder is mirrored to Google so it appears on every calendar.
-        let googleSync: GoogleSync = "off";
-        if (inp.scheduledStart) {
-          const start = new Date(inp.scheduledStart);
-          if (!Number.isNaN(start.getTime())) {
-            const end = inp.scheduledEnd ? new Date(inp.scheduledEnd) : new Date(start.getTime() + 30 * 60_000);
-            googleSync = await safeMirror({ kind: "todo", id: item.id, title: item.title, startsAt: start, endsAt: end });
-          }
-        }
-        return { created: "todo" as const, id: item.id, title: item.title, googleSync };
+        // A reminder fires a local browser notification — it is NOT mirrored to
+        // Google (reminders own notifications; events own the calendar).
+        const result = { id: item.id, title: item.title, googleSync: "off" as const };
+        createdBySlot.set(slot, result);
+        return { created: "todo" as const, ...result, remindAt: inp.remindAt ?? null };
       },
     }),
 
@@ -95,6 +129,10 @@ export function makeChatTools(
         "Create a calendar event. Provide ISO 8601 start and end datetimes.",
       inputSchema: eventToolSchema,
       execute: async (inp) => {
+        const slot = createKey("event", inp.title, inp.startsAt);
+        const prior = createdBySlot.get(slot);
+        if (prior) return { created: "event" as const, ...prior, duplicate: true };
+
         const projects = await listProjects(db);
         const item = await createEventFromInput(db, inp, projects, null);
         if (item === null) {
@@ -112,100 +150,75 @@ export function makeChatTools(
           startsAt: new Date(inp.startsAt),
           endsAt: new Date(inp.endsAt),
         });
+        createdBySlot.set(slot, { id: item.id, title: item.title, googleSync });
         return { created: "event" as const, id: item.id, title: item.title, googleSync };
       },
     }),
 
     delete_event: tool({
       description:
-        "Remove/cancel/delete an existing calendar event the user no longer wants. " +
-        "Match by title (and optional date range). Use this for any 'remove', 'cancel', " +
-        "'delete', or 'drop' request — never create an event to represent a removal.",
+        "Remove/cancel/delete an existing calendar item the user no longer wants. " +
+        "Prefer id+kind from read_calendar; otherwise match by title and optional date range. " +
+        "Use this for any 'remove', 'cancel', 'delete', or 'drop' request — never create an event to represent a removal.",
       inputSchema: z.object({
-        title: z.string().describe("Words from the event's title to match (case-insensitive substring)"),
+        id: z.string().optional().describe("Stable id from read_calendar. Prefer this."),
+        kind: z.enum(["event", "todo"]).optional().describe("Item kind from read_calendar when id is provided"),
+        title: z.string().optional().describe("Words from the item's title to match (case-insensitive substring), only if id is not known"),
         from: z.string().optional().describe("ISO 8601 start of the day/range to search, if the user named a date"),
         to: z.string().optional().describe("ISO 8601 end of the day/range to search"),
       }),
-      execute: async ({ title, from, to }) => {
-        const fromDate = from ? new Date(from) : undefined;
-        const toDate = to ? new Date(to) : undefined;
-        const matches = await findEventsByTitle(
-          db,
-          title,
-          fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined,
-          toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined,
-        );
-        if (matches.length === 0) {
-          return { deleted: false as const, reason: "not-found" as const, query: title };
-        }
-        if (matches.length > 1) {
+      execute: async ({ id, kind, title, from, to }) => {
+        const resolved = await resolveTarget({ id, kind: kind as CalendarItemKind | undefined, title, from, to });
+        if (!resolved.ok) {
           return {
             deleted: false as const,
-            reason: "ambiguous" as const,
-            matches: matches.map((m) => ({ title: m.title, startsAt: m.startsAt.toISOString() })),
+            reason: resolved.reason,
+            query: resolved.query ?? title,
+            matches: resolved.matches,
           };
         }
-        const ev = matches[0]!;
-        // Remove from Google first (so it won't re-sync), then locally.
-        if (deleteFromGoogle && ev.googleEventId && ev.googleAccountId && ev.calendarId) {
-          try {
-            await deleteFromGoogle({
-              accountId: ev.googleAccountId,
-              calendarId: ev.calendarId,
-              eventId: ev.googleEventId,
-            });
-          } catch (err) {
-            console.error(`delete_event: Google delete failed for ${ev.id}:`, err);
-          }
+        const result = await deleteCalendarItem(db, resolved.target, mutationDeps);
+        if (!result.ok) {
+          return {
+            deleted: false as const,
+            reason: result.reason,
+            googleSync: result.googleSync,
+            query: title ?? id,
+          };
         }
-        await deleteEvent(db, ev.id);
-        return { deleted: true as const, title: ev.title, startsAt: ev.startsAt.toISOString() };
+        return { deleted: true as const, ...calendarItemSummary(result.item), googleSync: result.googleSync };
       },
     }),
 
     update_event: tool({
       description:
-        "Modify an existing event — rename and/or reschedule it. Use for 'move', " +
-        "'reschedule', 'rename', 'change' requests. Find by title (and date range if given).",
+        "Modify an existing calendar item — rename and/or reschedule it. Use for 'move', " +
+        "'reschedule', 'rename', 'change' requests. Prefer id+kind from read_calendar; otherwise find by title/date.",
       inputSchema: updateEventToolSchema,
-      execute: async ({ title, from, to, newTitle, newStartsAt, newEndsAt }) => {
-        const fromDate = from ? new Date(from) : undefined;
-        const toDate = to ? new Date(to) : undefined;
-        const matches = await findEventsByTitle(
-          db,
-          title,
-          fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined,
-          toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined,
-        );
-        if (matches.length === 0) return { updated: false as const, reason: "not-found" as const, query: title };
-        if (matches.length > 1) {
+      execute: async ({ id, kind, title, from, to, newTitle, newStartsAt, newEndsAt }) => {
+        const resolved = await resolveTarget({ id, kind: kind as CalendarItemKind | undefined, title, from, to });
+        if (!resolved.ok) {
           return {
             updated: false as const,
-            reason: "ambiguous" as const,
-            matches: matches.map((m) => ({ title: m.title, startsAt: m.startsAt.toISOString() })),
+            reason: resolved.reason,
+            query: resolved.query ?? title,
+            matches: resolved.matches,
           };
         }
-        const target = matches[0]!;
-        const next = await updateEvent(db, target.id, {
+        const result = await updateCalendarItem(db, resolved.target, {
           title: newTitle,
-          startsAt: newStartsAt ? new Date(newStartsAt) : undefined,
-          endsAt: newEndsAt ? new Date(newEndsAt) : undefined,
-        });
-        if (next && updateInGoogle && next.googleEventId && next.googleAccountId && next.calendarId) {
-          try {
-            await updateInGoogle({
-              accountId: next.googleAccountId,
-              calendarId: next.calendarId,
-              eventId: next.googleEventId,
-              title: next.title,
-              startsAt: next.startsAt,
-              endsAt: next.endsAt,
-            });
-          } catch (err) {
-            console.error(`update_event: Google patch failed for ${next.id}:`, err);
-          }
+          startsAt: validDate(newStartsAt),
+          endsAt: validDate(newEndsAt),
+        }, mutationDeps);
+        if (!result.ok) {
+          return {
+            updated: false as const,
+            reason: result.reason,
+            googleSync: result.googleSync,
+            query: title ?? id,
+          };
         }
-        return { updated: true as const, title: next!.title, startsAt: next!.startsAt.toISOString() };
+        return { updated: true as const, ...calendarItemSummary(result.item), googleSync: result.googleSync };
       },
     }),
 
@@ -264,12 +277,20 @@ export function makeChatTools(
         const feed = await getCalendarFeed(db, fromDate, toDate);
         return {
           events: feed.events.map((e) => ({
+            id: e.id,
+            kind: "event" as const,
             title: e.title,
             startsAt: e.startsAt.toISOString(),
             endsAt: e.endsAt.toISOString(),
           })),
-          scheduledTodos: feed.scheduledTodos.map((t) => ({ title: t.title })),
-          unscheduledTodos: feed.unscheduledTodos.map((t) => ({ title: t.title })),
+          scheduledTodos: feed.scheduledTodos.map((t) => ({
+            id: t.id,
+            kind: "todo" as const,
+            title: t.title,
+            startsAt: t.scheduledStart?.toISOString() ?? "",
+            endsAt: (t.scheduledEnd ?? (t.scheduledStart ? new Date(t.scheduledStart.getTime() + 30 * 60_000) : null))?.toISOString() ?? "",
+          })),
+          unscheduledTodos: feed.unscheduledTodos.map((t) => ({ id: t.id, kind: "todo" as const, title: t.title })),
         };
       },
     }),

@@ -163,6 +163,24 @@ test("captureByHour: returns 24 slots zero-filled with correct counts", async ()
   expect(analytics.captureByHour[3]!.count).toBe(0);
 });
 
+test("buckets dumps by the requested timezone, not UTC", async () => {
+  // 2026-06-30T02:00:00Z is June 29, 22:00 in America/New_York (EDT, UTC-4).
+  await db.insert(dumps).values([
+    { text: "late night", createdAt: new Date("2026-06-30T02:00:00Z") },
+  ]);
+
+  const utc = await getAnalytics(db, NOW, "UTC");
+  expect(utc.captureByHour[2]!.count).toBe(1); // 02:00 UTC
+  expect(utc.captureByHour[22]!.count).toBe(0);
+
+  const ny = await getAnalytics(db, NOW, "America/New_York");
+  expect(ny.captureByHour[22]!.count).toBe(1); // 22:00 local
+  expect(ny.captureByHour[2]!.count).toBe(0);
+  // Lands on the local day (June 29), not the UTC day (June 30).
+  expect(ny.dumpsPerDay.find((d) => d.day === "2026-06-29")!.count).toBe(1);
+  expect(ny.dumpsPerDay.find((d) => d.day === "2026-06-30")).toBeUndefined();
+});
+
 test("streakDays: consecutive days ending today", async () => {
   await db.insert(dumps).values([
     { text: "today-1", createdAt: new Date("2026-06-29T09:00:00Z") },

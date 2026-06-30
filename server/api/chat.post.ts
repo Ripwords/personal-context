@@ -27,15 +27,22 @@ export default defineEventHandler(async (event) => {
     messages?: UIMessage[];
     sessionId?: string;
     timeZone?: string;
+    /** Calendar copilot: stream without persisting the session or its messages. */
+    ephemeral?: boolean;
   }
 
   const body = await readBody<ChatRequest>(event);
   const messages: UIMessage[] = body.messages ?? [];
+  const ephemeral = body.ephemeral === true;
 
   const db = getDb();
 
-  const sessionId = body.sessionId ?? (await createChatSession(db)).id;
-  setResponseHeader(event, "x-chat-session-id", sessionId);
+  // The copilot is ephemeral — skip all DB persistence so its quick exchanges
+  // never create sessions or clutter the /chat history.
+  const sessionId = ephemeral
+    ? null
+    : (body.sessionId ?? (await createChatSession(db)).id);
+  if (sessionId) setResponseHeader(event, "x-chat-session-id", sessionId);
 
   // Memory recall: find latest user message text for FTS search
   const latestUserMsg = [...messages]
@@ -47,7 +54,7 @@ export default defineEventHandler(async (event) => {
     .map((p) => p.text)
     .join(" ") ?? "";
 
-  if (latestUserMsg) {
+  if (latestUserMsg && sessionId) {
     await addChatMessage(db, {
       sessionId,
       role: "user",
@@ -90,9 +97,20 @@ export default defineEventHandler(async (event) => {
     memoriesBlock,
     projectsBlock,
     `\nTool guidance:`,
-    `- Use create_todo / create_event to capture tasks and events the user mentions.`,
-    `- To remove, cancel, delete, or drop an event the user no longer wants, use delete_event (match by title, plus from/to if they named a date). NEVER create an event to represent a deletion. If delete_event reports multiple matches, ask the user which one; if none, say so.`,
-    `- To move, reschedule, rename, or change an existing event, use update_event (find by title; set newTitle and/or newStartsAt/newEndsAt). Never create a duplicate to represent an edit.`,
+    `- Do not create, delete, or update items unless the user clearly asks for that action.`,
+    `- There are THREE kinds of item — choose deliberately:`,
+    `  • EVENT (create_event): a calendar block — a meeting, appointment, call, or anything involving other people, a place, or a span of time ("meeting with Anin at 10", "lunch 1–2pm", "dentist Friday 3pm"). Events go on the calendar and sync to Google.`,
+    `  • REMINDER (create_todo with remindAt): a personal nudge the user wants to be notified about at a time ("remind me to take meds at 8", "ping me to call the dentist at 2", "remind me about the deadline at 5pm"). A reminder fires a browser notification and is NOT placed on the calendar.`,
+    `  • PLAIN TODO (create_todo, no remindAt): a task with no specific time ("add buy milk to my todos"). A casually-mentioned rough day/time goes in notes, not remindAt.`,
+    `- Differentiate event vs reminder yourself from the wording. Only when it is genuinely ambiguous which one the user means, ask ONE short clarifying question before creating — otherwise just act.`,
+    `- Never ask for a time you don't need. If a plain todo was requested, create it and confirm in one turn — do not solicit a time.`,
+    `- create_event needs a clear date and start time (or enough to infer both confidently). If those are missing for something that really is an event, ask for them instead of guessing.`,
+    `- Create each item exactly once. Never call create_event/create_todo twice for the same item — one mention of "lunch at 1pm" is ONE event.`,
+    `- Event endsAt must be after startsAt. Use a normal duration (30-60 minutes) when the user gives a start time but no end time.`,
+    `- Before deleting/updating a calendar item, use read_calendar for the relevant range when the user gives a date/time; prefer the id+kind from read_calendar when calling delete_event/update_event.`,
+    `- To remove, cancel, delete, or drop an existing calendar item, use delete_event. NEVER create an event to represent a deletion. If delete_event reports multiple matches, ask the user which one; if none, say so.`,
+    `- To move, reschedule, rename, or change an existing calendar item, use update_event. Never create a duplicate to represent an edit.`,
+    `- If a calendar mutation reports needs-reauth or not-synced, tell the user the change was not applied and they may need to reconnect Google or retry.`,
     `- Use search_memory / search_documents before answering from memory.`,
     `- Use web_search for current or external information.`,
     `- Use read_calendar to check the user's schedule.`,
@@ -163,6 +181,7 @@ export default defineEventHandler(async (event) => {
     tools: makeChatTools(db, process.env, { mirror, deleteFromGoogle, updateInGoogle }),
     stopWhen: stepCountIs(8),
     onFinish: async ({ text }) => {
+      if (!sessionId) return; // ephemeral copilot — nothing to persist
       await addChatMessage(db, {
         sessionId,
         role: "assistant",

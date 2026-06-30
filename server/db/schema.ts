@@ -56,13 +56,36 @@ export const todos = pgTable("todos", {
   notes: text("notes"),
   projectId: uuid("project_id").references(() => projects.id),
   status: todoStatus("status").notNull().default("open"),
+  // `scheduledStart`/`scheduledEnd` are CALENDAR time-block scheduling: a todo
+  // with these set is gridded on the calendar (drag-to-schedule / wind-down) and
+  // can be mirrored to Google like an event. A todo with neither set is backlog.
   scheduledStart: timestamp("scheduled_start", { withTimezone: true }),
   scheduledEnd: timestamp("scheduled_end", { withTimezone: true }),
+  // `remindAt` is a REMINDER (notify-at) time — a personal nudge that fires a
+  // browser notification at that instant. It is NOT a calendar slot and is never
+  // gridded or synced to Google. (Events/blocks own the calendar; reminders own
+  // notifications.) A todo can be a block, a reminder, or plain backlog.
+  remindAt: timestamp("remind_at", { withTimezone: true }),
+  // Set when this reminder's browser notification has fired, so it never
+  // double-fires across reloads/tabs. Cleared when the reminder time changes.
+  notifiedAt: timestamp("notified_at", { withTimezone: true }),
   dumpId: uuid("dump_id").references(() => dumps.id),
   source: itemSource("source").notNull().default("manual"),
   confidence: real("confidence"),
+  // True when the AI's project tag is uncertain (low confidence, an unmatched
+  // project name, or a weak keyword guess) and should be surfaced for one-tap
+  // correction. Cleared once the user confirms or changes the project.
+  needsReview: boolean("needs_review").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+  // A scheduled todo that has been mirrored to Google carries the same identity
+  // triple as an event row, so it can later be patched/deleted on Google.
+  googleEventId: text("google_event_id"),
+  googleAccountId: text("google_account_id"),
+  calendarId: text("calendar_id"),
+  syncStatus: eventSyncStatus("sync_status").notNull().default("local"),
+}, (t) => ({
+  googleIdentity: uniqueIndex("todos_google_identity").on(t.googleAccountId, t.googleEventId),
+}));
 
 export const events = pgTable("events", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -79,6 +102,13 @@ export const events = pgTable("events", {
   dumpId: uuid("dump_id").references(() => dumps.id),
   syncStatus: eventSyncStatus("sync_status").notNull().default("local"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Last-write-wins bookkeeping. `updatedAt` is the row's last modification
+  // (local edit or applied Google change). `googleUpdatedAt` is Google's own
+  // `updated` timestamp from the last sync. A sync only overwrites the row when
+  // Google's change is newer than `updatedAt`, so a fresh local edit survives a
+  // stale background sync.
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  googleUpdatedAt: timestamp("google_updated_at", { withTimezone: true }),
 }, (t) => ({
   googleIdentity: uniqueIndex("events_google_identity").on(t.googleAccountId, t.googleEventId),
 }));

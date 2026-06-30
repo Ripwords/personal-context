@@ -8,10 +8,13 @@ interface ActivityRow {
   createdAt: string;
 }
 
+type GoogleSync = "synced" | "needs-reauth" | "not-synced" | "off";
+
 interface UndoResult {
   undone: boolean;
   action?: string;
   entityType?: string;
+  googleSync?: GoogleSync;
 }
 
 const toast = useToast();
@@ -42,7 +45,23 @@ async function undoLast(): Promise<void> {
   try {
     const result = await $fetch<UndoResult>("/api/undo", { method: "POST" });
     if (result.undone) {
-      toast.add({ title: `Undid last ${result.entityType ?? "action"}`, color: "neutral" });
+      // If the item was mirrored to Google but we couldn't remove it there,
+      // warn so the user knows a stale copy may remain on their calendar.
+      if (result.googleSync === "needs-reauth") {
+        toast.add({
+          title: `Undid last ${result.entityType ?? "action"}`,
+          description: "Couldn't remove it from Google Calendar — sign in again to sync.",
+          color: "warning",
+        });
+      } else if (result.googleSync === "not-synced") {
+        toast.add({
+          title: `Undid last ${result.entityType ?? "action"}`,
+          description: "It may still exist on your Google Calendar.",
+          color: "warning",
+        });
+      } else {
+        toast.add({ title: `Undid last ${result.entityType ?? "action"}`, color: "neutral" });
+      }
     } else {
       toast.add({ title: "Nothing to undo", color: "neutral" });
     }

@@ -55,11 +55,19 @@ async function applySchedule(): Promise<void> {
       startsAt: s.startsAt,
       endsAt: s.endsAt,
     }));
-    const result = await $fetch<{ scheduled: number }>("/api/wind-down/apply", {
-      method: "POST",
-      body: { blocks },
-    });
-    toast.add({ title: `Scheduled ${result.scheduled} items`, color: "neutral" });
+    const result = await $fetch<{ scheduled: number; writtenToGoogle: number; needsReauth: boolean }>(
+      "/api/wind-down/apply",
+      { method: "POST", body: { blocks, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } },
+    );
+    const synced = result.writtenToGoogle ? ` · synced ${result.writtenToGoogle} to Google` : "";
+    toast.add({ title: `Scheduled ${result.scheduled} event${result.scheduled === 1 ? "" : "s"}${synced}`, color: "neutral" });
+    if (result.needsReauth) {
+      toast.add({
+        title: "Scheduled locally — not synced to Google",
+        description: "Sign in again to grant calendar access.",
+        color: "warning",
+      });
+    }
   } catch {
     toast.add({ title: "Failed to apply schedule.", color: "neutral" });
   } finally {
@@ -79,26 +87,7 @@ function fmtTime(iso: string): string {
 <template>
   <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
-    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
-      <NuxtLink
-        to="/"
-        class="text-sm bd-faint hover:text-[var(--bd-text)]
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
-               motion-safe:transition-colors"
-        aria-label="Back to calendar"
-      >
-        ← Calendar
-      </NuxtLink>
-      <h1 class="text-sm font-medium bd-muted">Wind down</h1>
-      <NuxtLink
-        to="/dump"
-        class="text-sm bd-faint hover:text-[var(--bd-text)]
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
-               motion-safe:transition-colors"
-      >
-        Dump
-      </NuxtLink>
-    </header>
+    <AppHeader title="Wind down" />
 
     <!-- Body -->
     <main class="flex-1 flex flex-col items-center px-4 py-10 gap-8 max-w-2xl mx-auto w-full">

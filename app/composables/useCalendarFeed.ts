@@ -1,5 +1,15 @@
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { addDays } from "~/composables/useWeek";
+
+// localStorage key for the persisted feed snapshot. Bump the version suffix when
+// the cached shape (CalEvent/CalTodo/WeekChunk) changes so stale blobs are ignored.
+const STORAGE_KEY = "cal:feed:v1";
+
+interface PersistedFeed {
+  chunks: Record<string, WeekChunk>;
+  requested: string[];
+  unscheduled: CalTodo[];
+}
 
 export interface CalEvent {
   id: string;
@@ -58,12 +68,68 @@ export function useCalendarFeed() {
   const requestedKeys = useState<string[]>("cal:requested", () => []);
   const requested = new Set<string>(requestedKeys.value);
   const syncRequested = () => { requestedKeys.value = [...requested]; };
+  // Weeks already background-synced with Google this session, so scrolling back
+  // over them doesn't re-hit the network every time.
+  const syncedKeys = useState<string[]>("cal:synced", () => []);
+  const synced = new Set<string>(syncedKeys.value);
+  const syncSynced = () => { syncedKeys.value = [...synced]; };
   const unscheduledTodos = useState<CalTodo[]>("cal:unscheduled", () => []);
   const inFlight = useState<number>("cal:inflight", () => 0);
   const lastError = useState<{ statusCode?: number } | null>("cal:error", () => null);
 
   const loading = computed(() => inFlight.value > 0);
   const hasAny = computed(() => Object.keys(chunks.value).length > 0);
+
+  // ── localStorage persistence (stale-while-revalidate across hard reloads) ──
+  // useState survives SPA navigation but is wiped by a full page reload, which
+  // is why a refresh used to fall back to the "Loading…" skeleton. Mirroring the
+  // feed to localStorage lets a reload paint last-known events immediately while
+  // `reload()` refreshes them in the background.
+  function persist(): void {
+    if (!import.meta.client) return;
+    try {
+      const snapshot: PersistedFeed = {
+        chunks: chunks.value,
+        requested: [...requested],
+        unscheduled: unscheduledTodos.value,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Quota exceeded or storage disabled (private mode) — caching is best-effort.
+    }
+  }
+
+  // On mount: paint cached data instantly, then revalidate in the background
+  // (stale-while-revalidate). This runs every time the calendar page mounts, so
+  // returning from /chat — where events may have been created/edited/deleted —
+  // always refreshes the loaded weeks instead of showing the stale cache.
+  onMounted(() => {
+    if (!import.meta.client) return;
+
+    // Cache survives SPA navigation via useState; on a hard reload it's gone, so
+    // hydrate from localStorage after mount (not during setup) to keep SSR markup
+    // and the first client render in sync and avoid a grid hydration mismatch.
+    if (!hasAny.value) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as PersistedFeed;
+          if (saved.chunks && Object.keys(saved.chunks).length > 0) {
+            chunks.value = saved.chunks;
+            for (const k of saved.requested ?? []) requested.add(k);
+            syncRequested();
+            unscheduledTodos.value = saved.unscheduled ?? [];
+          }
+        }
+      } catch {
+        // Corrupt/old blob — ignore and fall back to a normal fetch.
+      }
+    }
+
+    // Refresh whatever weeks we already know about. If nothing is cached, the
+    // timeline's `ensureWeeks` will fetch the visible weeks fresh on its own.
+    if (hasAny.value) void reload();
+  });
 
   const events = computed(() =>
     dedupeById(Object.values(chunks.value).flatMap((c) => c.events)),
@@ -75,6 +141,45 @@ export function useCalendarFeed() {
     dedupeById(Object.values(chunks.value).flatMap((c) => c.scheduledTodos)),
   );
 
+  function rangeFor(mondayMarker: Date) {
+    return {
+      from: addDays(mondayMarker, -1).toISOString(),
+      to: addDays(mondayMarker, 8).toISOString(),
+    };
+  }
+
+  /** Read the cached DB feed for a week and merge it into `chunks`. No network sync. */
+  async function readWeek(mondayMarker: Date): Promise<void> {
+    const key = mondayMarker.toISOString();
+    const res = await $fetch<FeedResponse>("/api/calendar/events", { query: rangeFor(mondayMarker) });
+    chunks.value = {
+      ...chunks.value,
+      [key]: { events: res.events, allDayEvents: res.allDayEvents, scheduledTodos: res.scheduledTodos },
+    };
+    unscheduledTodos.value = res.unscheduledTodos;
+    lastError.value = null;
+    persist();
+  }
+
+  /**
+   * Background-sync a week with Google, then re-read it so new/changed events
+   * appear. Runs at most once per week per session; a failure clears the flag so
+   * it can retry. Decoupled from `readWeek` so the grid paints from the DB first.
+   */
+  async function syncWeek(mondayMarker: Date): Promise<void> {
+    const key = mondayMarker.toISOString();
+    if (synced.has(key)) return;
+    synced.add(key);
+    syncSynced();
+    try {
+      await $fetch("/api/calendar/sync", { method: "POST", query: rangeFor(mondayMarker) });
+      await readWeek(mondayMarker);
+    } catch {
+      synced.delete(key); // allow a retry later
+      syncSynced();
+    }
+  }
+
   async function fetchWeek(mondayMarker: Date): Promise<void> {
     const key = mondayMarker.toISOString();
     if (requested.has(key)) return;
@@ -82,18 +187,8 @@ export function useCalendarFeed() {
     syncRequested();
     inFlight.value++;
     try {
-      const res = await $fetch<FeedResponse>("/api/calendar/events", {
-        query: {
-          from: addDays(mondayMarker, -1).toISOString(),
-          to: addDays(mondayMarker, 8).toISOString(),
-        },
-      });
-      chunks.value = {
-        ...chunks.value,
-        [key]: { events: res.events, allDayEvents: res.allDayEvents, scheduledTodos: res.scheduledTodos },
-      };
-      unscheduledTodos.value = res.unscheduledTodos;
-      lastError.value = null;
+      await readWeek(mondayMarker); // instant paint from the DB
+      void syncWeek(mondayMarker); // revalidate from Google in the background
     } catch (err) {
       requested.delete(key); // allow a retry when this week scrolls back into view
       syncRequested();
@@ -108,12 +203,17 @@ export function useCalendarFeed() {
     for (const m of mondayMarkers) void fetchWeek(m);
   }
 
-  /** Refetch every currently-loaded week — used after a mutation (dump/drop). */
+  /**
+   * Refetch every currently-loaded week — used after a mutation (dump/drop).
+   * Re-reads the DB feed immediately and forces a fresh background sync so
+   * Google-side changes are picked up too.
+   */
   async function reload(): Promise<void> {
-    const keys = [...requested];
-    requested.clear();
-    syncRequested();
-    await Promise.all(keys.map((k) => fetchWeek(new Date(k))));
+    const markers = [...requested].map((k) => new Date(k));
+    synced.clear();
+    syncSynced();
+    await Promise.all(markers.map((m) => readWeek(m)));
+    for (const m of markers) void syncWeek(m);
   }
 
   return {

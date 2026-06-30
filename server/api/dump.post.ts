@@ -30,9 +30,51 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "text is required and must be non-empty" });
   }
 
+  const db = getDb();
+  const refresh = makeGoogleTokenRefresher(
+    process.env.GOOGLE_CLIENT_ID ?? "",
+    process.env.GOOGLE_CLIENT_SECRET ?? "",
+  );
+  let connsPromise: ReturnType<typeof getGoogleConnections> | null = null;
+  const connsForMutation = () => (connsPromise ??= getGoogleConnections(db));
+  const tokenCache = new Map<string, Promise<string>>();
+  const tokenFor = (accountId: string) => {
+    let p = tokenCache.get(accountId);
+    if (!p) {
+      p = (async () => {
+        const conns = await connsForMutation();
+        const conn = conns.find((c) => c.accountId === accountId);
+        if (!conn) throw new Error(`no connection for ${accountId}`);
+        return getFreshAccessToken(conn, Date.now(), refresh);
+      })();
+      tokenCache.set(accountId, p);
+    }
+    return p;
+  };
+  const deleteFromGoogle = async (input: { accountId: string; calendarId: string; eventId: string }) => {
+    const at = await tokenFor(input.accountId);
+    await makeGoogleEventDeleteApi(at).remove({ calendarId: input.calendarId, eventId: input.eventId });
+  };
+  const updateInGoogle = async (input: {
+    accountId: string; calendarId: string; eventId: string; title?: string; startsAt?: Date; endsAt?: Date;
+  }) => {
+    const at = await tokenFor(input.accountId);
+    await makeGoogleEventPatchApi(at).patch({
+      calendarId: input.calendarId,
+      eventId: input.eventId,
+      summary: input.title,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      timeZone: body.timeZone,
+    });
+  };
+
   let extractResult: Awaited<ReturnType<typeof extractFromDump>>;
   try {
-    extractResult = await extractFromDump(getDb(), makeModel(), body.text, body.timeZone);
+    extractResult = await extractFromDump(db, makeModel(), body.text, body.timeZone, {
+      deleteFromGoogle,
+      updateInGoogle,
+    });
   } catch (error) {
     console.error("extraction failed:", error);
     throw createError({ statusCode: 502, statusMessage: "extraction failed" });
@@ -54,29 +96,11 @@ export default defineEventHandler(async (event) => {
   const removedCount = extractResult.deleted.length;
   const updatedCount = extractResult.updated.length;
   try {
-    const db = getDb();
     const writebackItems = await resolveWritebackItems(db, extractResult.created);
-    const hasGoogleWork =
-      writebackItems.length > 0 ||
-      extractResult.deleted.some((e) => e.googleEventId) ||
-      extractResult.updated.some((e) => e.googleEventId);
+    const hasGoogleWork = writebackItems.length > 0;
 
     if (hasGoogleWork) {
-      const conns = await getGoogleConnections(db);
-      const refresh = makeGoogleTokenRefresher(
-        process.env.GOOGLE_CLIENT_ID ?? "",
-        process.env.GOOGLE_CLIENT_SECRET ?? "",
-      );
-      const tokenCache = new Map<string, Promise<string>>();
-      const tokenFor = (accountId: string) => {
-        let p = tokenCache.get(accountId);
-        if (!p) {
-          const conn = conns.find((c) => c.accountId === accountId);
-          p = conn ? getFreshAccessToken(conn, Date.now(), refresh) : Promise.reject(new Error("no connection"));
-          tokenCache.set(accountId, p);
-        }
-        return p;
-      };
+      const conns = await connsForMutation();
 
       // New items → dedicated Braindump calendar (personal account).
       if (writebackItems.length > 0) {
@@ -93,35 +117,6 @@ export default defineEventHandler(async (event) => {
           );
           writtenToGoogle = res.written;
           needsReauth = res.needsReauth;
-        }
-      }
-
-      // Removed events → delete from the calendar/account they live in.
-      for (const ev of extractResult.deleted) {
-        if (!ev.googleEventId || !ev.googleAccountId || !ev.calendarId) continue;
-        try {
-          const at = await tokenFor(ev.googleAccountId);
-          await makeGoogleEventDeleteApi(at).remove({ calendarId: ev.calendarId, eventId: ev.googleEventId });
-        } catch (err) {
-          console.error(`dump: Google delete failed for ${ev.id}:`, err);
-        }
-      }
-
-      // Edited events → patch the calendar/account they live in.
-      for (const ev of extractResult.updated) {
-        if (!ev.googleEventId || !ev.googleAccountId || !ev.calendarId) continue;
-        try {
-          const at = await tokenFor(ev.googleAccountId);
-          await makeGoogleEventPatchApi(at).patch({
-            calendarId: ev.calendarId,
-            eventId: ev.googleEventId,
-            summary: ev.title,
-            startsAt: new Date(ev.startsAt),
-            endsAt: new Date(ev.endsAt),
-            timeZone: body.timeZone,
-          });
-        } catch (err) {
-          console.error(`dump: Google patch failed for ${ev.id}:`, err);
         }
       }
     }

@@ -1,8 +1,8 @@
 import { defineEventHandler, createError, getRouterParam } from "h3";
-import { unlink } from "node:fs/promises";
 import { getDb } from "../../db/client";
 import { getAuthSession } from "../../utils/session";
 import { deleteDocument, getDocumentById } from "../../db/queries/documents";
+import { getObjectStore } from "../../storage/object-store";
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -20,11 +20,8 @@ export default defineEventHandler(async (event) => {
   // Delete from DB (cascades to chunks)
   await deleteDocument(db, id);
 
-  // Unlink the stored file — ignore ENOENT
-  await unlink(doc.storagePath).catch((err: unknown) => {
-    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw err;
-  });
+  // Remove the stored original — best-effort (the store ignores missing keys).
+  await getObjectStore().delete(doc.storagePath).catch(() => {});
 
   return { deleted: true };
 });

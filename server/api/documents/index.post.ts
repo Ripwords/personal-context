@@ -1,14 +1,12 @@
 import { defineEventHandler, createError, readMultipartFormData } from "h3";
-import { mkdir, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
 import { getDb } from "../../db/client";
 import { getAuthSession } from "../../utils/session";
 import { createDocumentWithChunks } from "../../db/queries/documents";
 import { extractText } from "../../rag/extract-text";
 import { chunkText } from "../../rag/chunk";
+import { getObjectStore } from "../../storage/object-store";
 
 const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-const UPLOADS_DIR = resolve("./uploads");
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -46,14 +44,13 @@ export default defineEventHandler(async (event) => {
     throw err;
   }
 
-  // Write to ./uploads/<uuid>-<safeName>
-  await mkdir(UPLOADS_DIR, { recursive: true });
-  const storageFilename = `${crypto.randomUUID()}-${safeName}`;
-  const storagePath = resolve(UPLOADS_DIR, storageFilename);
+  // Store the original under an opaque key (durable object storage when S3 is
+  // configured, ./uploads otherwise). The key is what we persist.
+  const store = getObjectStore();
+  const storageKey = `documents/${crypto.randomUUID()}-${safeName}`;
+  await store.put(storageKey, new Uint8Array(bytes), mimeType);
 
-  await Bun.write(storagePath, bytes);
-
-  // Chunk and store — unlink the file if the DB call fails to avoid orphans
+  // Chunk and store — delete the object if the DB call fails to avoid orphans
   const chunks = chunkText(text);
   let result: { documentId: string; chunks: number };
   try {
@@ -63,12 +60,12 @@ export default defineEventHandler(async (event) => {
         filename: safeName,
         mimeType,
         sizeBytes: bytes.length,
-        storagePath,
+        storagePath: storageKey,
       },
       chunks,
     );
   } catch (err) {
-    await unlink(storagePath).catch(() => {});
+    await store.delete(storageKey).catch(() => {});
     throw err;
   }
 

@@ -13,8 +13,15 @@ defineProps<{
 
 const emit = defineEmits<{
   drop: [id: string];
+  complete: [id: string];
   "clear-all": [];
 }>();
+
+// Drag-to-schedule: carry the todo id; the calendar grid reads it on drop.
+function onDragStart(e: DragEvent, id: string): void {
+  e.dataTransfer?.setData("application/x-braindump-todo", id);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
 </script>
 
 <template>
@@ -39,9 +46,24 @@ const emit = defineEmits<{
       <li
         v-for="todo in todos"
         :key="todo.id"
+        draggable="true"
         class="group flex items-start gap-2 rounded border bd-border bd-surface-2 px-3 py-2
-               text-sm bd-text cursor-default select-none"
+               text-sm bd-text cursor-grab active:cursor-grabbing select-none"
+        @dragstart="onDragStart($event, todo.id)"
       >
+        <!-- complete checkbox -->
+        <button
+          type="button"
+          class="mt-0.5 shrink-0 w-4 h-4 rounded-full border bd-border
+                 flex items-center justify-center text-[10px] leading-none
+                 hover:border-[var(--bd-text)] hover:text-[var(--bd-text)] bd-faint
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500
+                 motion-safe:transition-colors"
+          :aria-label="`Complete ${todo.title}`"
+          @click="emit('complete', todo.id)"
+        >
+          <span class="opacity-0 group-hover:opacity-100 motion-safe:transition-opacity">✓</span>
+        </button>
         <!-- project colour tick -->
         <span
           v-if="todo.projectId && projectColorMap[todo.projectId]"
