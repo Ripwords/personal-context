@@ -94,6 +94,11 @@ async function dropTodo(id: string): Promise<void> {
   await reload();
 }
 
+async function completeTodo(id: string): Promise<void> {
+  await $fetch(`/api/todos/${id}/complete`, { method: "POST", body: { done: true } });
+  await reload();
+}
+
 async function clearUnscheduled(): Promise<void> {
   await $fetch("/api/todos/clear-unscheduled", { method: "POST" });
   await reload();
@@ -312,6 +317,7 @@ const monthTitle = computed(() =>
           :todos="unscheduledTodos"
           :project-color-map="projectColorMap"
           @drop="dropTodo"
+          @complete="completeTodo"
           @clear-all="clearUnscheduled"
         />
       </aside>

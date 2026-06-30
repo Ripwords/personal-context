@@ -254,6 +254,26 @@ export async function listActivity(db: Db, limit = 50): Promise<Activity[]> {
     .limit(limit);
 }
 
+/** Mark a todo complete. Returns the updated row, or null if it doesn't exist. */
+export async function completeTodo(db: DbOrTx, id: string): Promise<Todo | null> {
+  const [row] = await db
+    .update(todos)
+    .set({ status: "done" })
+    .where(eq(todos.id, id))
+    .returning();
+  return row ?? null;
+}
+
+/** Reopen a completed/dropped todo (undo a completion). */
+export async function reopenTodo(db: DbOrTx, id: string): Promise<Todo | null> {
+  const [row] = await db
+    .update(todos)
+    .set({ status: "open" })
+    .where(eq(todos.id, id))
+    .returning();
+  return row ?? null;
+}
+
 export async function dropTodo(db: DbOrTx, id: string): Promise<Todo | null> {
   const [row] = await db
     .update(todos)

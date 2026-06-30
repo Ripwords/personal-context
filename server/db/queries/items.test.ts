@@ -17,6 +17,8 @@ import {
   listActivity,
   dropTodo,
   dropAllUnscheduledTodos,
+  completeTodo,
+  reopenTodo,
 } from "./items";
 
 const db = getTestDb();
@@ -54,6 +56,23 @@ test("scheduling a todo as a block (scheduledStart) does NOT touch a reminder's 
 
   const updated = await updateTodoSchedule(db, t.id, { scheduledStart: new Date("2026-07-02T08:00:00Z") });
   expect(updated!.notifiedAt!.toISOString()).toBe(at.toISOString());
+});
+
+test("completeTodo marks a todo done; reopenTodo returns it to open", async () => {
+  const t = await createTodo(db, { title: "ship it" });
+  const done = await completeTodo(db, t.id);
+  expect(done!.status).toBe("done");
+
+  // A completed todo leaves the unscheduled rail.
+  expect((await listUnscheduledTodos(db)).map((r) => r.title)).toEqual([]);
+
+  const reopened = await reopenTodo(db, t.id);
+  expect(reopened!.status).toBe("open");
+  expect((await listUnscheduledTodos(db)).map((r) => r.title)).toEqual(["ship it"]);
+});
+
+test("completeTodo returns null for a missing todo", async () => {
+  expect(await completeTodo(db, "00000000-0000-0000-0000-000000000000")).toBeNull();
 });
 
 test("createDump stores raw text", async () => {
