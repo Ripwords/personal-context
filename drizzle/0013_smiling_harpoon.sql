@@ -1,0 +1,1 @@
+ALTER TABLE "todos" ADD COLUMN "needs_review" boolean DEFAULT false NOT NULL;

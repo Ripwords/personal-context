@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../db/test-helpers";
 import { createProject } from "../db/queries/projects";
-import { listActivity, createEvent, findEventsByTitle } from "../db/queries/items";
+import { listActivity, createEvent, createDump, findEventsByTitle } from "../db/queries/items";
 import { applyToolCalls } from "./extract";
 
 // Strategy: test applyToolCalls directly with hand-built tool-call objects.
@@ -47,6 +47,32 @@ test("applyToolCalls: creates a todo with resolved projectId and logs activity",
   expect(acts[0]!.action).toBe("create");
   expect(acts[0]!.entityType).toBe("todo");
   expect(acts[0]!.entityId).toBe(created[0]!.id);
+});
+
+test("applyToolCalls: keyword classifier resolves project when the model omits it", async () => {
+  const work = await createProject(db, { name: "Work", color: "#111", kind: "work", keywords: ["deploy"] });
+  const dump = await createDump(db, "ship the deploy tonight");
+
+  const calls = [
+    { toolName: "create_todo", input: { title: "ship the deploy tonight", confidence: 0.9 } },
+  ];
+  const { created } = await applyToolCalls(db, dump.id, calls, [work]);
+
+  expect(created[0]!.projectId).toBe(work.id); // resolved via keyword "deploy"
+});
+
+test("applyToolCalls: an unmatched model project name flags needsReview and persists it", async () => {
+  const work = await createProject(db, { name: "Work", color: "#111", kind: "work" });
+  const dump = await createDump(db, "do the thing");
+
+  const calls = [
+    { toolName: "create_todo", input: { title: "do the thing", project: "Nonexistent Project", confidence: 0.9 } },
+  ];
+  const { created } = await applyToolCalls(db, dump.id, calls, [work]);
+
+  expect(created[0]!.needsReview).toBe(true);
+  const { getTodoById } = await import("../db/queries/items");
+  expect((await getTodoById(db, created[0]!.id))!.needsReview).toBe(true);
 });
 
 test("applyToolCalls: low confidence todo is flagged", async () => {

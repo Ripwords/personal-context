@@ -51,6 +51,66 @@ async function setRole(accountId: string, role: ConnectionRole) {
     roleError.value = err instanceof Error ? err.message : "Failed to update role";
   }
 }
+
+// ── Projects (CRUD + keyword tuning for the tagging classifier) ─────────────
+interface Project {
+  id: string;
+  name: string;
+  color: string;
+  kind: string;
+  keywords: string[];
+}
+
+const { data: projects, refresh: refreshProjects } = await useFetch<Project[]>(
+  "/api/projects",
+  { default: () => [] },
+);
+const newProjectName = ref("");
+const newProjectColor = ref("#0D9488");
+const projectError = ref<string | null>(null);
+
+async function addProject() {
+  if (!newProjectName.value.trim()) return;
+  projectError.value = null;
+  try {
+    await $fetch("/api/projects", {
+      method: "POST",
+      body: { name: newProjectName.value.trim(), color: newProjectColor.value, kind: "other", keywords: [] },
+    });
+    newProjectName.value = "";
+    await refreshProjects();
+  } catch {
+    projectError.value = "Couldn't create project";
+  }
+}
+
+async function patchProject(p: Project, body: Record<string, unknown>) {
+  try {
+    await $fetch(`/api/projects/${p.id}`, { method: "PATCH", body });
+    await refreshProjects();
+  } catch {
+    projectError.value = "Couldn't update project";
+  }
+}
+
+function renameProject(p: Project, name: string) {
+  if (!name.trim() || name.trim() === p.name) return;
+  void patchProject(p, { name: name.trim() });
+}
+
+function saveKeywords(p: Project, csv: string) {
+  const keywords = csv.split(",").map((s) => s.trim()).filter(Boolean);
+  void patchProject(p, { keywords });
+}
+
+async function removeProject(p: Project) {
+  try {
+    await $fetch(`/api/projects/${p.id}`, { method: "DELETE" });
+    await refreshProjects();
+  } catch {
+    projectError.value = "Couldn't delete project";
+  }
+}
 </script>
 
 <template>
@@ -125,6 +185,65 @@ async function setRole(accountId: string, role: ConnectionRole) {
         </ul>
 
         <p v-else class="text-sm bd-faint">No connected accounts yet.</p>
+      </section>
+
+      <!-- Projects -->
+      <section class="flex flex-col gap-4">
+        <h2 class="text-sm font-semibold tracking-tight bd-muted">Projects</h2>
+        <p class="text-xs bd-faint -mt-2">
+          Keywords bias the AI's auto-tagging. Edit a project's keywords (comma-separated) to teach it.
+        </p>
+
+        <p v-if="projectError" class="text-xs text-red-400">{{ projectError }}</p>
+
+        <ul v-if="projects && projects.length > 0" class="flex flex-col gap-2">
+          <li
+            v-for="p in projects"
+            :key="p.id"
+            class="flex items-center gap-3 px-4 py-3 border bd-border rounded-lg bd-surface"
+          >
+            <span class="shrink-0 w-3 h-3 rounded-full" :style="{ backgroundColor: p.color }" aria-hidden="true" />
+            <input
+              class="w-32 shrink-0 text-sm bg-transparent bd-text border-b border-transparent hover:border-[var(--bd-border)] focus:border-[var(--bd-border)] focus-visible:outline-none"
+              :value="p.name"
+              :aria-label="`Project name`"
+              @change="renameProject(p, ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              class="flex-1 text-xs bd-muted bg-transparent border-b border-transparent hover:border-[var(--bd-border)] focus:border-[var(--bd-border)] focus-visible:outline-none"
+              :value="p.keywords.join(', ')"
+              placeholder="keywords, comma, separated"
+              :aria-label="`Keywords for ${p.name}`"
+              @change="saveKeywords(p, ($event.target as HTMLInputElement).value)"
+            />
+            <button
+              type="button"
+              class="shrink-0 text-xs bd-faint hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded"
+              :aria-label="`Delete ${p.name}`"
+              @click="removeProject(p)"
+            >
+              ✕
+            </button>
+          </li>
+        </ul>
+
+        <div class="flex items-center gap-2">
+          <input
+            type="color"
+            v-model="newProjectColor"
+            class="shrink-0 w-8 h-8 rounded bg-transparent border bd-border cursor-pointer"
+            aria-label="New project color"
+          />
+          <input
+            v-model="newProjectName"
+            placeholder="New project name"
+            class="flex-1 text-sm bd-text bd-surface border bd-border rounded px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
+            @keydown.enter="addProject"
+          />
+          <UButton color="neutral" variant="outline" size="sm" :disabled="!newProjectName.trim()" @click="addProject">
+            Add
+          </UButton>
+        </div>
       </section>
     </main>
   </div>

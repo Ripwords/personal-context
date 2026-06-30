@@ -13,6 +13,7 @@ import {
   type CalendarItemTarget,
 } from "../db/queries/items";
 import { listProjects } from "../db/queries/projects";
+import { classifyProjectByKeywords } from "./classify-project";
 import { extractionTools } from "./tools";
 import type { TodoToolInput, EventToolInput, DeleteEventToolInput, UpdateEventToolInput } from "./tools";
 import {
@@ -45,6 +46,7 @@ export type ExtractResult = {
     projectId: string | null;
     confidence: number | null;
     lowConfidence: boolean;
+    needsReview: boolean;
   }>;
   deleted: AffectedEvent[];
   updated: AffectedEvent[];
@@ -86,8 +88,11 @@ export async function createTodoFromInput(
   projects: ReadonlyArray<Project>,
   dumpId: string | null = null,
 ): Promise<CreatedItem> {
-  const projectId = resolveProject(inp.project, projects);
+  const { projectId, needsReview: tagNeedsReview } = resolveProject(
+    inp.project, projects, `${inp.title} ${inp.notes ?? ""}`,
+  );
   const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
+  const needsReview = lowConfidence || tagNeedsReview;
 
   // A reminder carries a notify-at time in `remindAt` (a reminder is a point in
   // time, so there is no end). It fires a browser notification and is never
@@ -105,6 +110,7 @@ export async function createTodoFromInput(
     remindAt,
     source: "ai",
     confidence: inp.confidence ?? null,
+    needsReview,
     dumpId: dumpId ?? undefined,
   });
 
@@ -122,6 +128,7 @@ export async function createTodoFromInput(
     projectId,
     confidence: inp.confidence ?? null,
     lowConfidence,
+    needsReview,
   };
 }
 
@@ -141,7 +148,9 @@ export async function createEventFromInput(
     return null;
   }
 
-  const projectId = resolveProject(inp.project, projects);
+  const { projectId, needsReview: tagNeedsReview } = resolveProject(
+    inp.project, projects, `${inp.title} ${inp.notes ?? ""}`,
+  );
   const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
 
   const event = await createEvent(db, {
@@ -166,6 +175,9 @@ export async function createEventFromInput(
     projectId,
     confidence: inp.confidence ?? null,
     lowConfidence,
+    // Events don't persist needsReview (they're explicit calendar items), but we
+    // surface a tag hint in the response so the dump UI can flag a bad guess.
+    needsReview: lowConfidence || tagNeedsReview,
   };
 }
 
@@ -357,12 +369,28 @@ export function createKey(
   return `${kind} ${normTitle} ${slot}`;
 }
 
-function resolveProject(
+/**
+ * Resolve a project for an item. First trust an exact name the model returned;
+ * otherwise fall back to the deterministic keyword classifier over the item's
+ * text (title + notes). `needsReview` is set when the tag is uncertain — the
+ * model named a project we don't have, or we only got a weak keyword guess — so
+ * the UI can flag it for one-tap correction.
+ */
+export function resolveProject(
   name: string | undefined,
   projects: ReadonlyArray<Project>,
-): string | null {
-  if (!name) return null;
-  const lower = name.toLowerCase();
-  const match = projects.find((p) => p.name.toLowerCase() === lower);
-  return match?.id ?? null;
+  text = "",
+): { projectId: string | null; needsReview: boolean } {
+  if (name) {
+    const lower = name.toLowerCase();
+    const exact = projects.find((p) => p.name.toLowerCase() === lower);
+    if (exact) return { projectId: exact.id, needsReview: false };
+    // The model named a project that doesn't exist — try to recover via keywords,
+    // but flag for review either way since the model's tag was off.
+    const guess = classifyProjectByKeywords(`${name} ${text}`, projects);
+    return { projectId: guess.projectId, needsReview: true };
+  }
+  // No model tag: keyword-classify the text. A single weak hit is review-worthy.
+  const guess = classifyProjectByKeywords(text, projects);
+  return { projectId: guess.projectId, needsReview: guess.projectId !== null && guess.score < 2 };
 }

@@ -72,6 +72,10 @@ export const todos = pgTable("todos", {
   dumpId: uuid("dump_id").references(() => dumps.id),
   source: itemSource("source").notNull().default("manual"),
   confidence: real("confidence"),
+  // True when the AI's project tag is uncertain (low confidence, an unmatched
+  // project name, or a weak keyword guess) and should be surfaced for one-tap
+  // correction. Cleared once the user confirms or changes the project.
+  needsReview: boolean("needs_review").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   // A scheduled todo that has been mirrored to Google carries the same identity
   // triple as an event row, so it can later be patched/deleted on Google.

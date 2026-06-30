@@ -254,6 +254,24 @@ export async function listActivity(db: Db, limit = 50): Promise<Activity[]> {
     .limit(limit);
 }
 
+/**
+ * Set (or confirm) a todo's project, clearing needsReview. Passing the existing
+ * projectId is a "mark correct" one-tap confirmation; passing a new one is a
+ * correction. `null` clears the project.
+ */
+export async function setTodoProject(
+  db: DbOrTx,
+  id: string,
+  projectId: string | null,
+): Promise<Todo | null> {
+  const [row] = await db
+    .update(todos)
+    .set({ projectId, needsReview: false })
+    .where(eq(todos.id, id))
+    .returning();
+  return row ?? null;
+}
+
 /** Mark a todo complete. Returns the updated row, or null if it doesn't exist. */
 export async function completeTodo(db: DbOrTx, id: string): Promise<Todo | null> {
   const [row] = await db
