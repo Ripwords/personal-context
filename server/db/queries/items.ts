@@ -168,6 +168,8 @@ export async function updateEvent(
     const [row] = await db.select().from(events).where(eq(events.id, id));
     return row ?? null;
   }
+  // Stamp updatedAt so last-write-wins protects this edit from a stale re-sync.
+  set.updatedAt = new Date();
   const [row] = await db.update(events).set(set).where(eq(events.id, id)).returning();
   return row ?? null;
 }

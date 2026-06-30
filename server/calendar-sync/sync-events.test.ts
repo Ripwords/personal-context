@@ -35,6 +35,45 @@ test("normalizeEvent skips events with no start/end", () => {
   expect(normalizeEvent({ id: "g2" }, "acc1")).toBeNull();
 });
 
+test("last-write-wins: a newer Google edit overwrites the local row", async () => {
+  const from = new Date("2026-07-01T00:00:00Z");
+  const to = new Date("2026-07-02T00:00:00Z");
+  await db.insert(eventsTable).values({
+    title: "Old title", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "g1", googleAccountId: "acc1", calendarId: "primary", syncStatus: "synced",
+    updatedAt: new Date("2026-07-01T08:00:00Z"), googleUpdatedAt: new Date("2026-07-01T08:00:00Z"),
+  });
+
+  const api: EventsApi = { list: async () => [
+    { id: "g1", summary: "New title", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T10:00:00Z" },
+      updated: "2026-07-01T12:00:00Z" }, // newer than local updatedAt
+  ] };
+  await syncConnectionEvents(db, conn, "at", api, from, to, "primary");
+
+  const [row] = await db.select().from(eventsTable).where(eq(eventsTable.googleEventId, "g1"));
+  expect(row!.title).toBe("New title"); // Google's newer edit wins
+});
+
+test("last-write-wins: a stale Google copy does NOT clobber a fresher local edit", async () => {
+  const from = new Date("2026-07-01T00:00:00Z");
+  const to = new Date("2026-07-02T00:00:00Z");
+  // Local row edited "just now" (well after Google's last-known update).
+  await db.insert(eventsTable).values({
+    title: "Local edit", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "g1", googleAccountId: "acc1", calendarId: "primary", syncStatus: "synced",
+    updatedAt: new Date("2026-07-01T18:00:00Z"), googleUpdatedAt: new Date("2026-07-01T08:00:00Z"),
+  });
+
+  const api: EventsApi = { list: async () => [
+    { id: "g1", summary: "Stale title", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T10:00:00Z" },
+      updated: "2026-07-01T08:00:00Z" }, // older than local updatedAt
+  ] };
+  await syncConnectionEvents(db, conn, "at", api, from, to, "primary");
+
+  const [row] = await db.select().from(eventsTable).where(eq(eventsTable.googleEventId, "g1"));
+  expect(row!.title).toBe("Local edit"); // local edit preserved
+});
+
 test("normalizeEvent flags all-day events (start.date, no dateTime) and tags calendarId", () => {
   const timed = normalizeEvent(
     { id: "g1", summary: "Standup", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T09:15:00Z" } },

@@ -102,6 +102,13 @@ export const events = pgTable("events", {
   dumpId: uuid("dump_id").references(() => dumps.id),
   syncStatus: eventSyncStatus("sync_status").notNull().default("local"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Last-write-wins bookkeeping. `updatedAt` is the row's last modification
+  // (local edit or applied Google change). `googleUpdatedAt` is Google's own
+  // `updated` timestamp from the last sync. A sync only overwrites the row when
+  // Google's change is newer than `updatedAt`, so a fresh local edit survives a
+  // stale background sync.
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  googleUpdatedAt: timestamp("google_updated_at", { withTimezone: true }),
 }, (t) => ({
   googleIdentity: uniqueIndex("events_google_identity").on(t.googleAccountId, t.googleEventId),
 }));

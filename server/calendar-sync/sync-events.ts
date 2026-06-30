@@ -1,5 +1,5 @@
 // server/calendar-sync/sync-events.ts
-import { and, eq, gt, isNotNull, lt, notInArray } from "drizzle-orm";
+import { and, eq, gt, isNotNull, lt, notInArray, sql } from "drizzle-orm";
 import { type Db, type DbOrTx } from "../db/client";
 import { events, googleCalendar, type NewEventRow } from "../db/schema";
 import type { GoogleCreds } from "../auth/google-credentials";
@@ -9,6 +9,8 @@ export type RawGoogleEvent = {
   summary?: string;
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
+  /** Google's RFC3339 last-modification time; drives last-write-wins. */
+  updated?: string;
 };
 
 export type RawGoogleCalendar = {
@@ -51,6 +53,7 @@ export function normalizeEvent(
   if (!startsAt || !endsAt) return null;
   // Google all-day events carry `start.date` (no `start.dateTime`).
   const allDay = !raw.start?.dateTime && !!raw.start?.date;
+  const googleUpdatedAt = raw.updated ? new Date(raw.updated) : null;
   return {
     title: raw.summary ?? "(no title)",
     startsAt,
@@ -60,6 +63,11 @@ export function normalizeEvent(
     calendarId,
     allDay,
     syncStatus: "synced",
+    googleUpdatedAt: googleUpdatedAt && !Number.isNaN(googleUpdatedAt.getTime()) ? googleUpdatedAt : null,
+    // A freshly synced row's last modification IS Google's update time, so a
+    // later local edit (which bumps updatedAt to "now") wins over re-syncs of
+    // this same Google version.
+    updatedAt: googleUpdatedAt && !Number.isNaN(googleUpdatedAt.getTime()) ? googleUpdatedAt : undefined,
   };
 }
 
@@ -132,7 +140,17 @@ export async function syncConnectionEvents(
             calendarId: row.calendarId,
             allDay: row.allDay,
             syncStatus: "synced",
+            googleUpdatedAt: row.googleUpdatedAt,
+            updatedAt: row.updatedAt ?? sql`now()`,
           },
+          // Last-write-wins: only apply Google's version when its change is
+          // strictly newer than the row's last modification. A just-made local
+          // edit bumped updatedAt to "now", so a stale Google copy can't clobber
+          // it; a genuinely newer Google edit still wins. When Google sends no
+          // `updated`, fall back to overwriting (no basis to prefer local).
+          setWhere: row.googleUpdatedAt
+            ? sql`${events.updatedAt} is null or ${row.googleUpdatedAt} > ${events.updatedAt}`
+            : undefined,
         });
     }
   });
