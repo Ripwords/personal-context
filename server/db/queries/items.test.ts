@@ -25,8 +25,8 @@ beforeEach(async () => {
 });
 
 test("listReminders returns open timed todos soonest-first; markReminderNotified stamps them", async () => {
-  const later = await createTodo(db, { title: "later", scheduledStart: new Date("2026-07-01T15:00:00Z") });
-  await createTodo(db, { title: "sooner", scheduledStart: new Date("2026-07-01T09:00:00Z") });
+  const later = await createTodo(db, { title: "later", remindAt: new Date("2026-07-01T15:00:00Z") });
+  await createTodo(db, { title: "sooner", remindAt: new Date("2026-07-01T09:00:00Z") });
   await createTodo(db, { title: "plain" }); // no time → not a reminder
 
   const reminders = await listReminders(db);
@@ -39,12 +39,21 @@ test("listReminders returns open timed todos soonest-first; markReminderNotified
   expect(after.find((r) => r.id === later.id)!.notifiedAt!.toISOString()).toBe(at.toISOString());
 });
 
-test("rescheduling a reminder clears notifiedAt so it can fire again", async () => {
-  const t = await createTodo(db, { title: "meds", scheduledStart: new Date("2026-07-01T08:00:00Z") });
+test("rescheduling a reminder (remindAt) clears notifiedAt so it can fire again", async () => {
+  const t = await createTodo(db, { title: "meds", remindAt: new Date("2026-07-01T08:00:00Z") });
   await markReminderNotified(db, t.id, new Date("2026-07-01T08:00:01Z"));
 
-  const updated = await updateTodoSchedule(db, t.id, { scheduledStart: new Date("2026-07-02T08:00:00Z") });
+  const updated = await updateTodoSchedule(db, t.id, { remindAt: new Date("2026-07-02T08:00:00Z") });
   expect(updated!.notifiedAt).toBeNull();
+});
+
+test("scheduling a todo as a block (scheduledStart) does NOT touch a reminder's notifiedAt", async () => {
+  const t = await createTodo(db, { title: "task", remindAt: new Date("2026-07-01T08:00:00Z") });
+  const at = new Date("2026-07-01T08:00:01Z");
+  await markReminderNotified(db, t.id, at);
+
+  const updated = await updateTodoSchedule(db, t.id, { scheduledStart: new Date("2026-07-02T08:00:00Z") });
+  expect(updated!.notifiedAt!.toISOString()).toBe(at.toISOString());
 });
 
 test("createDump stores raw text", async () => {

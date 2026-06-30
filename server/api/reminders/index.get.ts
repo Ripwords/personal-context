@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
     title: t.title,
     notes: t.notes,
     projectId: t.projectId,
-    remindAt: t.scheduledStart!.toISOString(),
+    remindAt: t.remindAt!.toISOString(),
     notifiedAt: t.notifiedAt?.toISOString() ?? null,
   }));
 });

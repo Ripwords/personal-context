@@ -8,7 +8,7 @@ import {
   listUnscheduledTodos,
   listScheduledTodosInRange,
   getTodoById,
-  createEvent,
+  updateTodoSchedule,
   logActivity,
 } from "../db/queries/items";
 
@@ -139,16 +139,16 @@ Instructions:
 
 // ── applyWindDownSchedule ──────────────────────────────────────────────────
 
-/** An event created by applying a wind-down schedule. */
+/** A todo scheduled as a time-block by applying a wind-down schedule. */
 export type WindDownEvent = { id: string; title: string; startsAt: Date; endsAt: Date };
 
 /**
- * Applies a wind-down schedule by creating a calendar EVENT (time block) for
- * each proposed slot, carrying the source todo's title + project. Time-blocking
- * tomorrow's work belongs on the calendar — not as reminders — so wind-down
- * produces events. The source todos are left untouched in the backlog (the event
- * reserves the time; the todo stays your task until you complete it). Skips
- * blocks with invalid dates or a missing todo. Returns the created events so the
+ * Applies a wind-down schedule by turning each proposed slot's source todo into
+ * a calendar time-block — setting its `scheduledStart`/`scheduledEnd` — rather
+ * than spawning a separate event row. The todo IS the block: it leaves the
+ * backlog and grids on the calendar (one source of truth, no duplicate mental
+ * load), and can be mirrored to Google like any scheduled todo. Skips blocks
+ * with invalid dates or a missing todo. Returns the scheduled todos so the
  * caller can mirror them to Google.
  */
 export async function applyWindDownSchedule(
@@ -169,21 +169,17 @@ export async function applyWindDownSchedule(
       const todo = await getTodoById(tx, block.todoId);
       if (!todo) continue;
 
-      const event = await createEvent(tx, {
-        title: todo.title,
-        startsAt,
-        endsAt,
-        projectId: todo.projectId,
-      });
+      const scheduled = await updateTodoSchedule(tx, block.todoId, { scheduledStart: startsAt, scheduledEnd: endsAt });
+      if (!scheduled) continue;
 
       await logActivity(tx, {
         action: "schedule",
-        entityType: "event",
-        entityId: event.id,
+        entityType: "todo",
+        entityId: scheduled.id,
         payload: { todoId: block.todoId, startsAt: block.startsAt, endsAt: block.endsAt },
       });
 
-      created.push({ id: event.id, title: event.title, startsAt: event.startsAt, endsAt: event.endsAt });
+      created.push({ id: scheduled.id, title: scheduled.title, startsAt, endsAt });
     }
 
     return created;

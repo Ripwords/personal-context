@@ -18,15 +18,17 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = getDb();
-  const events = await applyWindDownSchedule(db, parsed.data.blocks);
+  const scheduledTodos = await applyWindDownSchedule(db, parsed.data.blocks);
 
-  // Mirror the new time blocks to the user's Braindump Google calendar so they
-  // appear in their other calendar apps. Best-effort — never fail the apply.
+  // Mirror the newly-scheduled todo blocks to the user's Braindump Google
+  // calendar so they appear in their other calendar apps. Best-effort — never
+  // fail the apply. Mirrored as todos so the Google id is stored back on the
+  // todo row (not a separate event).
   let writtenToGoogle = 0;
   let needsReauth = false;
   try {
-    const items = events.map((e) => ({
-      kind: "event" as const, id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt,
+    const items = scheduledTodos.map((t) => ({
+      kind: "todo" as const, id: t.id, title: t.title, startsAt: t.startsAt, endsAt: t.endsAt,
     }));
     const res = await mirrorEventsToBraindump(db, items, process.env, parsed.data.timeZone);
     writtenToGoogle = res.written;
@@ -35,5 +37,5 @@ export default defineEventHandler(async (event) => {
     console.error("wind-down Google sync failed (non-fatal):", err);
   }
 
-  return { scheduled: events.length, writtenToGoogle, needsReauth };
+  return { scheduled: scheduledTodos.length, writtenToGoogle, needsReauth };
 });

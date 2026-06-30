@@ -89,20 +89,20 @@ export async function createTodoFromInput(
   const projectId = resolveProject(inp.project, projects);
   const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
 
-  // A reminder carries a notify-at time in `scheduledStart` (a reminder is a
-  // point in time, so there is no end). It fires a browser notification and is
-  // never gridded or mirrored to Google. Plain todos have no time.
-  let scheduledStart: Date | undefined;
+  // A reminder carries a notify-at time in `remindAt` (a reminder is a point in
+  // time, so there is no end). It fires a browser notification and is never
+  // gridded or mirrored to Google. Plain todos have no time.
+  let remindAt: Date | undefined;
   if (inp.remindAt) {
     const s = new Date(inp.remindAt);
-    if (!Number.isNaN(s.getTime())) scheduledStart = s;
+    if (!Number.isNaN(s.getTime())) remindAt = s;
   }
 
   const todo = await createTodo(db, {
     title: inp.title,
     notes: inp.notes ?? null,
     projectId,
-    scheduledStart,
+    remindAt,
     source: "ai",
     confidence: inp.confidence ?? null,
     dumpId: dumpId ?? undefined,

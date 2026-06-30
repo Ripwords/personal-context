@@ -1,6 +1,6 @@
 import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../db/test-helpers";
-import { createTodo, listActivity, listEventsInRange, listUnscheduledTodos } from "../db/queries/items";
+import { createTodo, listActivity, listScheduledTodosInRange, listUnscheduledTodos } from "../db/queries/items";
 import { applyWindDownSchedule, type WindDownProposal } from "./winddown";
 import type { LanguageModel } from "ai";
 import type { Db } from "../db/client";
@@ -34,19 +34,20 @@ test("applyWindDownSchedule: creates a calendar event for a valid block, skips i
 
   const created = await applyWindDownSchedule(db, blocks);
 
-  // Only the valid block becomes an event.
+  // Only the valid block schedules its todo.
   expect(created).toHaveLength(1);
   expect(created[0]!.title).toBe("Write quarterly report");
+  expect(created[0]!.id).toBe(todo1.id); // the todo IS the block (not a new event row)
 
-  const events = await listEventsInRange(db, new Date("2026-06-30T00:00:00Z"), new Date("2026-07-01T00:00:00Z"));
-  expect(events.map((e) => e.title)).toEqual(["Write quarterly report"]);
-  expect(events[0]!.startsAt.toISOString()).toBe("2026-06-30T09:00:00.000Z");
-  expect(events[0]!.endsAt.toISOString()).toBe("2026-06-30T10:00:00.000Z");
+  // The scheduled todo becomes a calendar block; no separate event row is made.
+  const scheduled = await listScheduledTodosInRange(db, new Date("2026-06-30T00:00:00Z"), new Date("2026-07-01T00:00:00Z"));
+  expect(scheduled.map((t) => t.title)).toEqual(["Write quarterly report"]);
+  expect(scheduled[0]!.scheduledStart!.toISOString()).toBe("2026-06-30T09:00:00.000Z");
+  expect(scheduled[0]!.scheduledEnd!.toISOString()).toBe("2026-06-30T10:00:00.000Z");
 
-  // Todos are left in the backlog (events reserve time; todos stay your tasks).
-  // Neither becomes a reminder.
+  // The scheduled todo leaves the backlog; the unscheduled one stays.
   const open = await listUnscheduledTodos(db);
-  expect(open.map((t) => t.title).sort()).toEqual(["Review pull requests", "Write quarterly report"]);
+  expect(open.map((t) => t.title)).toEqual(["Review pull requests"]);
 });
 
 test("applyWindDownSchedule: logs an activity row with action=schedule for each created event", async () => {
@@ -62,12 +63,11 @@ test("applyWindDownSchedule: logs an activity row with action=schedule for each 
 
   await applyWindDownSchedule(db, blocks);
 
-  const events = await listEventsInRange(db, new Date("2026-06-30T00:00:00Z"), new Date("2026-07-01T00:00:00Z"));
   const activities = await listActivity(db);
   expect(activities).toHaveLength(1);
   expect(activities[0]!.action).toBe("schedule");
-  expect(activities[0]!.entityType).toBe("event");
-  expect(activities[0]!.entityId).toBe(events[0]!.id);
+  expect(activities[0]!.entityType).toBe("todo");
+  expect(activities[0]!.entityId).toBe(todo.id);
   expect(activities[0]!.payload).toEqual({
     todoId: todo.id,
     startsAt: "2026-06-30T14:00:00.000Z",

@@ -337,10 +337,10 @@ test("read_calendar: returns events; reminders (timed todos) are not gridded", a
     startsAt: new Date("2026-07-01T09:00:00Z"),
     endsAt: new Date("2026-07-01T09:30:00Z"),
   });
-  // A timed todo is a reminder now — it must NOT appear on the calendar read.
+  // A reminder (remindAt) must NOT appear on the calendar read.
   await createTodo(db, {
     title: "Check project",
-    scheduledStart: new Date("2026-07-01T14:00:00Z"),
+    remindAt: new Date("2026-07-01T14:00:00Z"),
   });
   const tools = makeChatTools(db, {});
 

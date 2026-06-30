@@ -34,25 +34,30 @@ export async function createTodo(db: DbOrTx, input: NewTodo): Promise<Todo> {
   return row!;
 }
 
+/**
+ * Backlog: open todos that are neither scheduled as a calendar block
+ * (`scheduledStart`) nor a reminder (`remindAt`). These populate the unscheduled
+ * rail and are the drag-to-schedule source.
+ */
 export async function listUnscheduledTodos(db: Db): Promise<Todo[]> {
   return db
     .select()
     .from(todos)
-    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart)))
+    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart), isNull(todos.remindAt)))
     .orderBy(desc(todos.createdAt));
 }
 
 /**
  * Open reminders (todos with a notify-at time), soonest first. Powers the
- * reminders rail and the foreground notifier. `scheduledStart` is the reminder
- * time; `notifiedAt` lets the client skip ones already shown.
+ * reminders rail and the foreground notifier. `remindAt` is the reminder time;
+ * `notifiedAt` lets the client skip ones already shown.
  */
 export async function listReminders(db: Db): Promise<Todo[]> {
   return db
     .select()
     .from(todos)
-    .where(and(eq(todos.status, "open"), isNotNull(todos.scheduledStart)))
-    .orderBy(todos.scheduledStart);
+    .where(and(eq(todos.status, "open"), isNotNull(todos.remindAt)))
+    .orderBy(todos.remindAt);
 }
 
 /** Mark a reminder's notification as fired so it never double-fires. */
@@ -174,6 +179,7 @@ export async function updateTodoSchedule(
     title?: string;
     scheduledStart?: Date | null;
     scheduledEnd?: Date | null;
+    remindAt?: Date | null;
     googleEventId?: string | null;
     googleAccountId?: string | null;
     calendarId?: string | null;
@@ -182,12 +188,15 @@ export async function updateTodoSchedule(
 ): Promise<Todo | null> {
   const set: Partial<NewTodo> = {};
   if (fields.title !== undefined) set.title = fields.title;
-  if (fields.scheduledStart !== undefined) {
-    set.scheduledStart = fields.scheduledStart;
+  // `scheduledStart`/`scheduledEnd` are calendar-block scheduling now (not the
+  // reminder time), so changing them does not touch `notifiedAt`.
+  if (fields.scheduledStart !== undefined) set.scheduledStart = fields.scheduledStart;
+  if (fields.scheduledEnd !== undefined) set.scheduledEnd = fields.scheduledEnd;
+  if (fields.remindAt !== undefined) {
+    set.remindAt = fields.remindAt;
     // Rescheduling a reminder must let it fire again at its new time.
     set.notifiedAt = null;
   }
-  if (fields.scheduledEnd !== undefined) set.scheduledEnd = fields.scheduledEnd;
   if (fields.googleEventId !== undefined) set.googleEventId = fields.googleEventId;
   if (fields.googleAccountId !== undefined) set.googleAccountId = fields.googleAccountId;
   if (fields.calendarId !== undefined) set.calendarId = fields.calendarId;
@@ -258,7 +267,7 @@ export async function dropAllUnscheduledTodos(db: DbOrTx): Promise<number> {
   const rows = await db
     .update(todos)
     .set({ status: "dropped" })
-    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart)))
+    .where(and(eq(todos.status, "open"), isNull(todos.scheduledStart), isNull(todos.remindAt)))
     .returning({ id: todos.id });
   return rows.length;
 }

@@ -56,13 +56,16 @@ export const todos = pgTable("todos", {
   notes: text("notes"),
   projectId: uuid("project_id").references(() => projects.id),
   status: todoStatus("status").notNull().default("open"),
-  // For a todo, `scheduledStart` is its REMINDER time (notify-at) — NOT a
-  // calendar slot. A todo with scheduledStart set is a "reminder": it fires a
-  // browser notification at that time and is never gridded or synced to Google.
-  // (Events own the calendar; reminders own notifications.) `scheduledEnd` is
-  // unused for reminders (a reminder is a point in time).
+  // `scheduledStart`/`scheduledEnd` are CALENDAR time-block scheduling: a todo
+  // with these set is gridded on the calendar (drag-to-schedule / wind-down) and
+  // can be mirrored to Google like an event. A todo with neither set is backlog.
   scheduledStart: timestamp("scheduled_start", { withTimezone: true }),
   scheduledEnd: timestamp("scheduled_end", { withTimezone: true }),
+  // `remindAt` is a REMINDER (notify-at) time — a personal nudge that fires a
+  // browser notification at that instant. It is NOT a calendar slot and is never
+  // gridded or synced to Google. (Events/blocks own the calendar; reminders own
+  // notifications.) A todo can be a block, a reminder, or plain backlog.
+  remindAt: timestamp("remind_at", { withTimezone: true }),
   // Set when this reminder's browser notification has fired, so it never
   // double-fires across reloads/tabs. Cleared when the reminder time changes.
   notifiedAt: timestamp("notified_at", { withTimezone: true }),
