@@ -1,6 +1,17 @@
-import { S3Client } from "bun";
+import type { S3Client } from "bun";
 import { mkdir, unlink, readFile } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
+
+// `bun` is a runtime builtin (the server runs under Bun), not a bundle-time
+// module — a value import makes the Node-based bundler warn and externalize it.
+// Import the type only and read the constructor off the global at call time.
+function s3ClientCtor(): typeof S3Client {
+  const bun = (globalThis as { Bun?: { S3Client?: typeof S3Client } }).Bun;
+  if (!bun?.S3Client) {
+    throw new Error("S3 object storage requires the Bun runtime; unset S3_* to use local storage.");
+  }
+  return bun.S3Client;
+}
 
 /**
  * Storage backend for uploaded document originals. Two implementations:
@@ -62,8 +73,9 @@ export class S3Store implements ObjectStore {
 /** Build the configured store. S3 when S3_BUCKET + credentials are set, else local. */
 export function makeObjectStore(env: Record<string, string | undefined> = process.env): ObjectStore {
   if (env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY) {
+    const Ctor = s3ClientCtor();
     return new S3Store(
-      new S3Client({
+      new Ctor({
         bucket: env.S3_BUCKET,
         accessKeyId: env.S3_ACCESS_KEY_ID,
         secretAccessKey: env.S3_SECRET_ACCESS_KEY,
