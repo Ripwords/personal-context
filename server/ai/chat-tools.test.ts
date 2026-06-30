@@ -2,7 +2,7 @@ import { test, expect, beforeEach } from "bun:test";
 import { getTestDb, truncateAll } from "../db/test-helpers";
 import { createProject } from "../db/queries/projects";
 import { createMemory } from "../db/queries/memory";
-import { listActivity, createEvent, findEventsByTitle } from "../db/queries/items";
+import { listActivity, createEvent, findEventsByTitle, getEventById, createTodo, getTodoById } from "../db/queries/items";
 import { makeChatTools } from "./chat-tools";
 
 // Strategy: call each tool's execute() directly — no LLM, no network.
@@ -106,6 +106,45 @@ test("delete_event: reports not-found / ambiguous instead of deleting", async ()
   expect((await findEventsByTitle(db, "sync")).length).toBe(2);
 });
 
+test("delete_event: does not delete a synced local row when Google delete fails", async () => {
+  const ev = await createEvent(db, {
+    title: "Doctor",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "g-doctor",
+    googleAccountId: "acc1",
+    calendarId: "cal1",
+  });
+  const tools = makeChatTools(db, {}, {
+    deleteFromGoogle: async () => { throw new Error("network down"); },
+  });
+
+  const result = (await tools.delete_event.execute!(
+    { id: ev.id, kind: "event" },
+    { toolCallId: "d4", messages: [] },
+  )) as { deleted: boolean; reason?: string; googleSync?: string };
+
+  expect(result).toMatchObject({ deleted: false, reason: "not-synced", googleSync: "not-synced" });
+  expect(await getEventById(db, ev.id)).not.toBeNull();
+});
+
+test("delete_event: can delete a scheduled todo by id and kind", async () => {
+  const todo = await createTodo(db, {
+    title: "Check project",
+    scheduledStart: new Date("2026-07-01T14:00:00Z"),
+    scheduledEnd: new Date("2026-07-01T14:30:00Z"),
+  });
+  const tools = makeChatTools(db, {});
+
+  const result = (await tools.delete_event.execute!(
+    { id: todo.id, kind: "todo" },
+    { toolCallId: "d5", messages: [] },
+  )) as { deleted: boolean; kind?: string };
+
+  expect(result).toMatchObject({ deleted: true, kind: "todo" });
+  expect((await getTodoById(db, todo.id))!.status).toBe("dropped");
+});
+
 // ── create_event ─────────────────────────────────────────────────────────────
 
 test("create_event: inserts a calendar event and returns id+title", async () => {
@@ -131,6 +170,34 @@ test("create_event: inserts a calendar event and returns id+title", async () => 
   expect(acts[0]!.entityType).toBe("event");
 });
 
+test("create_event: a duplicate call in the same request returns the first event, no second row", async () => {
+  const tools = makeChatTools(db, {});
+  const input = {
+    title: "Lunch",
+    startsAt: "2026-07-01T13:00:00.000Z",
+    endsAt: "2026-07-01T13:30:00.000Z",
+    confidence: 0.9,
+  };
+
+  const first = await tools.create_event.execute!(input, { toolCallId: "dup-1", messages: [] });
+  const second = await tools.create_event.execute!({ ...input }, { toolCallId: "dup-2", messages: [] });
+
+  expect(second.id).toBe(first.id);
+  expect((await findEventsByTitle(db, "Lunch")).length).toBe(1);
+  expect((await listActivity(db)).length).toBe(1);
+});
+
+test("create_todo: a duplicate call in the same request returns the first todo, no second row", async () => {
+  const tools = makeChatTools(db, {});
+  const input = { title: "stretch", scheduledStart: "2026-07-01T15:00:00.000Z", confidence: 0.8 };
+
+  const first = await tools.create_todo.execute!(input, { toolCallId: "dupt-1", messages: [] });
+  const second = await tools.create_todo.execute!({ ...input }, { toolCallId: "dupt-2", messages: [] });
+
+  expect(second.id).toBe(first.id);
+  expect((await listActivity(db)).length).toBe(1);
+});
+
 test("create_event: returns error object for invalid dates, does not insert", async () => {
   const tools = makeChatTools(db, {});
 
@@ -150,6 +217,45 @@ test("create_event: returns error object for invalid dates, does not insert", as
 
   const acts = await listActivity(db);
   expect(acts).toHaveLength(0);
+});
+
+test("create_event: rejects end times that are not after start", async () => {
+  const tools = makeChatTools(db, {});
+
+  const result = await tools.create_event.execute!(
+    {
+      title: "Backwards",
+      startsAt: "2026-07-01T10:00:00.000Z",
+      endsAt: "2026-07-01T09:30:00.000Z",
+      confidence: 0.8,
+    },
+    { toolCallId: "test-4b", messages: [] },
+  );
+
+  expect("error" in result && typeof result.error).toBe("string");
+  expect((await findEventsByTitle(db, "Backwards")).length).toBe(0);
+});
+
+test("update_event: preserves local synced event when Google patch fails", async () => {
+  const ev = await createEvent(db, {
+    title: "Standup",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T09:15:00Z"),
+    googleEventId: "g-standup",
+    googleAccountId: "acc1",
+    calendarId: "cal1",
+  });
+  const tools = makeChatTools(db, {}, {
+    updateInGoogle: async () => { throw new Error("network down"); },
+  });
+
+  const result = (await tools.update_event.execute!(
+    { id: ev.id, kind: "event", newStartsAt: "2026-07-01T10:00:00.000Z" },
+    { toolCallId: "u1", messages: [] },
+  )) as { updated: boolean; reason?: string; googleSync?: string };
+
+  expect(result).toMatchObject({ updated: false, reason: "not-synced", googleSync: "not-synced" });
+  expect((await getEventById(db, ev.id))!.startsAt.toISOString()).toBe("2026-07-01T09:00:00.000Z");
 });
 
 // ── search_memory ─────────────────────────────────────────────────────────────
@@ -223,6 +329,28 @@ test("read_calendar: returns empty feed for a range with no data", async () => {
   expect(result.events).toEqual([]);
   expect(result.scheduledTodos).toEqual([]);
   expect(result.unscheduledTodos).toEqual([]);
+});
+
+test("read_calendar: returns events; reminders (timed todos) are not gridded", async () => {
+  const ev = await createEvent(db, {
+    title: "Team sync",
+    startsAt: new Date("2026-07-01T09:00:00Z"),
+    endsAt: new Date("2026-07-01T09:30:00Z"),
+  });
+  // A timed todo is a reminder now — it must NOT appear on the calendar read.
+  await createTodo(db, {
+    title: "Check project",
+    scheduledStart: new Date("2026-07-01T14:00:00Z"),
+  });
+  const tools = makeChatTools(db, {});
+
+  const result = await tools.read_calendar.execute!(
+    { from: "2026-07-01T00:00:00.000Z", to: "2026-07-02T00:00:00.000Z" },
+    { toolCallId: "test-9b", messages: [] },
+  );
+
+  expect(result.events[0]).toMatchObject({ id: ev.id, kind: "event", title: "Team sync" });
+  expect(result.scheduledTodos).toEqual([]);
 });
 
 test("read_calendar: returns error for invalid date range", async () => {

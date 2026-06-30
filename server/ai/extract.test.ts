@@ -159,7 +159,64 @@ test("applyToolCalls: event with invalid startsAt is skipped, valid todo in same
   expect(acts[0]!.entityType).toBe("todo");
 });
 
-test("applyToolCalls: delete_event removes matching events and reports them with google identity", async () => {
+test("applyToolCalls: collapses duplicate create_event calls for the same slot", async () => {
+  const { createDump } = await import("../db/queries/items");
+  const dump = await createDump(db, "lunch at 1pm tomorrow");
+
+  // The model sometimes emits the same create_event twice in one response.
+  const event = {
+    title: "Lunch",
+    startsAt: "2026-06-30T13:00:00.000Z",
+    endsAt: "2026-06-30T13:30:00.000Z",
+    confidence: 0.9,
+  };
+  const calls = [
+    { toolName: "create_event", input: event },
+    { toolName: "create_event", input: { ...event } },
+  ];
+
+  const { created } = await applyToolCalls(db, dump.id, calls, []);
+
+  expect(created).toHaveLength(1);
+  expect(created[0]!.title).toBe("Lunch");
+
+  // Only one row + one activity, not two.
+  expect((await findEventsByTitle(db, "Lunch")).length).toBe(1);
+  expect((await listActivity(db)).length).toBe(1);
+});
+
+test("applyToolCalls: dedup ignores title casing/whitespace but keeps distinct times", async () => {
+  const { createDump } = await import("../db/queries/items");
+  const dump = await createDump(db, "lunch tomorrow, dinner tomorrow");
+
+  const calls = [
+    { toolName: "create_event", input: { title: "Lunch", startsAt: "2026-06-30T13:00:00.000Z", endsAt: "2026-06-30T13:30:00.000Z", confidence: 0.9 } },
+    { toolName: "create_event", input: { title: "  lunch ", startsAt: "2026-06-30T13:00:00.000Z", endsAt: "2026-06-30T14:00:00.000Z", confidence: 0.9 } },
+    { toolName: "create_event", input: { title: "Lunch", startsAt: "2026-06-30T19:00:00.000Z", endsAt: "2026-06-30T19:30:00.000Z", confidence: 0.9 } },
+  ];
+
+  const { created } = await applyToolCalls(db, dump.id, calls, []);
+
+  // First two collapse (same title + same start); third is a distinct slot.
+  expect(created).toHaveLength(2);
+});
+
+test("applyToolCalls: collapses duplicate create_todo calls for the same slot", async () => {
+  const { createDump } = await import("../db/queries/items");
+  const dump = await createDump(db, "remind me to stretch at 3pm");
+
+  const todo = { title: "stretch", scheduledStart: "2026-06-30T15:00:00.000Z", confidence: 0.8 };
+  const calls = [
+    { toolName: "create_todo", input: todo },
+    { toolName: "create_todo", input: { ...todo } },
+  ];
+
+  const { created } = await applyToolCalls(db, dump.id, calls, []);
+
+  expect(created).toHaveLength(1);
+});
+
+test("applyToolCalls: delete_event does not mass-delete ambiguous title matches", async () => {
   const dump = { id: "00000000-0000-0000-0000-000000000000" };
   await createEvent(db, {
     title: "2pm meeting", startsAt: new Date("2026-07-01T06:00:00Z"), endsAt: new Date("2026-07-01T06:30:00Z"),
@@ -173,9 +230,29 @@ test("applyToolCalls: delete_event removes matching events and reports them with
     { toolName: "delete_event", input: { title: "2pm meeting" } },
   ], []);
 
-  expect(deleted.length).toBe(2);
-  expect(deleted.find((d) => d.googleEventId === "g1")).toBeDefined();
-  expect((await findEventsByTitle(db, "2pm meeting")).length).toBe(0);
+  expect(deleted.length).toBe(0);
+  expect((await findEventsByTitle(db, "2pm meeting")).length).toBe(2);
+});
+
+test("applyToolCalls: delete_event removes one synced match only after Google succeeds", async () => {
+  await createEvent(db, {
+    title: "Dentist", startsAt: new Date("2026-07-01T06:00:00Z"), endsAt: new Date("2026-07-01T06:30:00Z"),
+    googleEventId: "g1", googleAccountId: "acc1", calendarId: "cal1",
+  });
+  const googleDeletes: string[] = [];
+
+  const { deleted } = await applyToolCalls(db, "00000000-0000-0000-0000-000000000000", [
+    { toolName: "delete_event", input: { title: "Dentist" } },
+  ], [], {
+    deleteFromGoogle: async ({ accountId, calendarId, eventId }) => {
+      googleDeletes.push(`${accountId}/${calendarId}/${eventId}`);
+    },
+  });
+
+  expect(deleted.length).toBe(1);
+  expect(deleted[0]!.googleEventId).toBe("g1");
+  expect(googleDeletes).toEqual(["acc1/cal1/g1"]);
+  expect((await findEventsByTitle(db, "Dentist")).length).toBe(0);
 });
 
 test("applyToolCalls: update_event reschedules a single match and reports it", async () => {
@@ -186,7 +263,9 @@ test("applyToolCalls: update_event reschedules a single match and reports it", a
 
   const { updated } = await applyToolCalls(db, "00000000-0000-0000-0000-000000000000", [
     { toolName: "update_event", input: { title: "Standup", newStartsAt: "2026-07-01T02:00:00Z", newEndsAt: "2026-07-01T02:15:00Z" } },
-  ], []);
+  ], [], {
+    updateInGoogle: async () => undefined,
+  });
 
   expect(updated.length).toBe(1);
   expect(updated[0]!.startsAt).toBe("2026-07-01T02:00:00.000Z");

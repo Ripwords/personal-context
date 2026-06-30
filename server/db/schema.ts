@@ -56,13 +56,29 @@ export const todos = pgTable("todos", {
   notes: text("notes"),
   projectId: uuid("project_id").references(() => projects.id),
   status: todoStatus("status").notNull().default("open"),
+  // For a todo, `scheduledStart` is its REMINDER time (notify-at) — NOT a
+  // calendar slot. A todo with scheduledStart set is a "reminder": it fires a
+  // browser notification at that time and is never gridded or synced to Google.
+  // (Events own the calendar; reminders own notifications.) `scheduledEnd` is
+  // unused for reminders (a reminder is a point in time).
   scheduledStart: timestamp("scheduled_start", { withTimezone: true }),
   scheduledEnd: timestamp("scheduled_end", { withTimezone: true }),
+  // Set when this reminder's browser notification has fired, so it never
+  // double-fires across reloads/tabs. Cleared when the reminder time changes.
+  notifiedAt: timestamp("notified_at", { withTimezone: true }),
   dumpId: uuid("dump_id").references(() => dumps.id),
   source: itemSource("source").notNull().default("manual"),
   confidence: real("confidence"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+  // A scheduled todo that has been mirrored to Google carries the same identity
+  // triple as an event row, so it can later be patched/deleted on Google.
+  googleEventId: text("google_event_id"),
+  googleAccountId: text("google_account_id"),
+  calendarId: text("calendar_id"),
+  syncStatus: eventSyncStatus("sync_status").notNull().default("local"),
+}, (t) => ({
+  googleIdentity: uniqueIndex("todos_google_identity").on(t.googleAccountId, t.googleEventId),
+}));
 
 export const events = pgTable("events", {
   id: uuid("id").primaryKey().defaultRandom(),

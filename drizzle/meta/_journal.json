@@ -71,6 +71,20 @@
       "when": 1782696480332,
       "tag": "0009_adorable_may_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782739590582,
+      "tag": "0010_wealthy_living_tribunal",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782780188764,
+      "tag": "0011_add_todo_notified_at",
+      "breakpoints": true
     }
   ]
 }

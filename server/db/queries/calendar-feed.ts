@@ -1,7 +1,7 @@
 import { and, gte, lt, isNull, or, eq } from "drizzle-orm";
 import { type Db } from "../client";
 import { events, googleCalendar, type Todo } from "../schema";
-import { listScheduledTodosInRange, listUnscheduledTodos } from "./items";
+import { listUnscheduledTodos } from "./items";
 
 export type FeedEvent = {
   id: string;
@@ -62,15 +62,17 @@ export async function listFeedEventsInRange(db: Db, from: Date, to: Date): Promi
 }
 
 export async function getCalendarFeed(db: Db, from: Date, to: Date): Promise<CalendarFeed> {
-  const [feedEvents, scheduledTodos, unscheduledTodos] = await Promise.all([
+  const [feedEvents, unscheduledTodos] = await Promise.all([
     listFeedEventsInRange(db, from, to),
-    listScheduledTodosInRange(db, from, to),
     listUnscheduledTodos(db),
   ]);
   return {
     events: feedEvents.filter((e) => !e.allDay),
     allDayEvents: feedEvents.filter((e) => e.allDay),
-    scheduledTodos,
+    // Timed todos are REMINDERS now — they fire notifications instead of being
+    // gridded on the calendar (see /api/reminders + useReminders). Kept as an
+    // empty list so existing feed consumers stay source-compatible.
+    scheduledTodos: [],
     unscheduledTodos,
   };
 }

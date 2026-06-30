@@ -1,5 +1,15 @@
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { addDays } from "~/composables/useWeek";
+
+// localStorage key for the persisted feed snapshot. Bump the version suffix when
+// the cached shape (CalEvent/CalTodo/WeekChunk) changes so stale blobs are ignored.
+const STORAGE_KEY = "cal:feed:v1";
+
+interface PersistedFeed {
+  chunks: Record<string, WeekChunk>;
+  requested: string[];
+  unscheduled: CalTodo[];
+}
 
 export interface CalEvent {
   id: string;
@@ -65,6 +75,57 @@ export function useCalendarFeed() {
   const loading = computed(() => inFlight.value > 0);
   const hasAny = computed(() => Object.keys(chunks.value).length > 0);
 
+  // ── localStorage persistence (stale-while-revalidate across hard reloads) ──
+  // useState survives SPA navigation but is wiped by a full page reload, which
+  // is why a refresh used to fall back to the "Loading…" skeleton. Mirroring the
+  // feed to localStorage lets a reload paint last-known events immediately while
+  // `reload()` refreshes them in the background.
+  function persist(): void {
+    if (!import.meta.client) return;
+    try {
+      const snapshot: PersistedFeed = {
+        chunks: chunks.value,
+        requested: [...requested],
+        unscheduled: unscheduledTodos.value,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Quota exceeded or storage disabled (private mode) — caching is best-effort.
+    }
+  }
+
+  // On mount: paint cached data instantly, then revalidate in the background
+  // (stale-while-revalidate). This runs every time the calendar page mounts, so
+  // returning from /chat — where events may have been created/edited/deleted —
+  // always refreshes the loaded weeks instead of showing the stale cache.
+  onMounted(() => {
+    if (!import.meta.client) return;
+
+    // Cache survives SPA navigation via useState; on a hard reload it's gone, so
+    // hydrate from localStorage after mount (not during setup) to keep SSR markup
+    // and the first client render in sync and avoid a grid hydration mismatch.
+    if (!hasAny.value) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as PersistedFeed;
+          if (saved.chunks && Object.keys(saved.chunks).length > 0) {
+            chunks.value = saved.chunks;
+            for (const k of saved.requested ?? []) requested.add(k);
+            syncRequested();
+            unscheduledTodos.value = saved.unscheduled ?? [];
+          }
+        }
+      } catch {
+        // Corrupt/old blob — ignore and fall back to a normal fetch.
+      }
+    }
+
+    // Refresh whatever weeks we already know about. If nothing is cached, the
+    // timeline's `ensureWeeks` will fetch the visible weeks fresh on its own.
+    if (hasAny.value) void reload();
+  });
+
   const events = computed(() =>
     dedupeById(Object.values(chunks.value).flatMap((c) => c.events)),
   );
@@ -94,6 +155,7 @@ export function useCalendarFeed() {
       };
       unscheduledTodos.value = res.unscheduledTodos;
       lastError.value = null;
+      persist();
     } catch (err) {
       requested.delete(key); // allow a retry when this week scrolls back into view
       syncRequested();

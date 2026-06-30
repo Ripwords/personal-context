@@ -82,6 +82,89 @@ test("syncAllCalendars stores calendar metadata and syncs only selected calendar
   expect(synced.map((e) => e.calendarId).sort()).toEqual(["birthdays", "primary"]);
 });
 
+test("syncConnectionEvents removes a synced row deleted in Google within the window", async () => {
+  const from = new Date("2026-07-01T00:00:00Z");
+  const to = new Date("2026-07-02T00:00:00Z");
+
+  const apiBoth: EventsApi = {
+    list: async () => [
+      { id: "g1", summary: "Keep", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T10:00:00Z" } },
+      { id: "g2", summary: "DeleteMe", start: { dateTime: "2026-07-01T11:00:00Z" }, end: { dateTime: "2026-07-01T12:00:00Z" } },
+    ],
+  };
+  await syncConnectionEvents(db, conn, "at", apiBoth, from, to);
+  expect((await db.select().from(eventsTable)).length).toBe(2);
+
+  // g2 deleted in another client → Google now only returns g1.
+  const apiOne: EventsApi = {
+    list: async () => [
+      { id: "g1", summary: "Keep", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T10:00:00Z" } },
+    ],
+  };
+  await syncConnectionEvents(db, conn, "at", apiOne, from, to);
+
+  const rows = await db.select().from(eventsTable);
+  expect(rows.map((r) => r.googleEventId)).toEqual(["g1"]);
+});
+
+test("syncConnectionEvents reconciles deletions even when Google returns an empty window", async () => {
+  const from = new Date("2026-07-01T00:00:00Z");
+  const to = new Date("2026-07-02T00:00:00Z");
+
+  // A synced event in-window (its Google copy was removed).
+  await db.insert(eventsTable).values({
+    title: "Gone", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "gGone", googleAccountId: "acc1", calendarId: "primary", syncStatus: "synced",
+  });
+  // A local-only event (never synced) in-window — must NOT be deleted.
+  await db.insert(eventsTable).values({
+    title: "Local only", startsAt: new Date("2026-07-01T11:00:00Z"), endsAt: new Date("2026-07-01T12:00:00Z"),
+    googleAccountId: "acc1", calendarId: "primary", syncStatus: "local",
+  });
+  // A synced event OUTSIDE the window — must NOT be deleted.
+  await db.insert(eventsTable).values({
+    title: "Outside", startsAt: new Date("2026-07-05T09:00:00Z"), endsAt: new Date("2026-07-05T10:00:00Z"),
+    googleEventId: "gOut", googleAccountId: "acc1", calendarId: "primary", syncStatus: "synced",
+  });
+
+  const apiEmpty: EventsApi = { list: async () => [] };
+  await syncConnectionEvents(db, conn, "at", apiEmpty, from, to, "primary");
+
+  const titles = (await db.select().from(eventsTable)).map((r) => r.title).sort();
+  expect(titles).toEqual(["Local only", "Outside"]); // "Gone" removed; the other two preserved
+});
+
+test("syncAllCalendars reflects deletions from the Braindump calendar (deletion-only, no re-insert)", async () => {
+  const connBd: GoogleCreds = { ...conn, braindumpCalendarId: "braindump" };
+  // A local braindump-created event linked to the braindump calendar.
+  await db.insert(eventsTable).values({
+    title: "AI event", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z"),
+    googleEventId: "bd1", googleAccountId: "acc1", calendarId: "braindump", syncStatus: "synced",
+  });
+
+  const calListApi: CalendarListApi = {
+    list: async () => [
+      { id: "primary", summary: "Me", selected: true, primary: true },
+      { id: "braindump", summary: "Braindump", selected: true },
+    ],
+  };
+  // primary empty; braindump returns a *different* event (must NOT be inserted),
+  // and bd1 is absent (deleted in another client → must be removed locally).
+  const eventsApi: EventsApi = {
+    list: async ({ calendarId }) =>
+      calendarId === "braindump"
+        ? [{ id: "bd2", summary: "made in google", start: { dateTime: "2026-07-01T14:00:00Z" }, end: { dateTime: "2026-07-01T15:00:00Z" } }]
+        : [],
+  };
+
+  const from = new Date("2026-07-01T00:00:00Z");
+  const to = new Date("2026-07-02T00:00:00Z");
+  await syncAllCalendars(db, connBd, "at", calListApi, eventsApi, from, to);
+
+  const rows = await db.select().from(eventsTable);
+  expect(rows.length).toBe(0); // bd1 removed; bd2 not re-inserted (braindump is deletion-only)
+});
+
 test("syncConnectionEvents upserts and is idempotent on (account,event) identity", async () => {
   const events = [
     { id: "g1", summary: "Standup", start: { dateTime: "2026-07-01T09:00:00Z" }, end: { dateTime: "2026-07-01T09:15:00Z" } },

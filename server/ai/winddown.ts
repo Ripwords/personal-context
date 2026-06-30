@@ -1,12 +1,14 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { eq, gte } from "drizzle-orm";
+import { gte } from "drizzle-orm";
 import type { LanguageModel } from "ai";
 import type { Db } from "../db/client";
-import { dumps, todos } from "../db/schema";
+import { dumps } from "../db/schema";
 import {
   listUnscheduledTodos,
   listScheduledTodosInRange,
+  getTodoById,
+  createEvent,
   logActivity,
 } from "../db/queries/items";
 
@@ -137,41 +139,53 @@ Instructions:
 
 // ── applyWindDownSchedule ──────────────────────────────────────────────────
 
+/** An event created by applying a wind-down schedule. */
+export type WindDownEvent = { id: string; title: string; startsAt: Date; endsAt: Date };
+
 /**
- * Applies a wind-down schedule to the database.
- * For each block, parses the datetimes and UPDATEs the corresponding todo.
- * Skips blocks with invalid dates. Returns the count of todos actually scheduled.
+ * Applies a wind-down schedule by creating a calendar EVENT (time block) for
+ * each proposed slot, carrying the source todo's title + project. Time-blocking
+ * tomorrow's work belongs on the calendar — not as reminders — so wind-down
+ * produces events. The source todos are left untouched in the backlog (the event
+ * reserves the time; the todo stays your task until you complete it). Skips
+ * blocks with invalid dates or a missing todo. Returns the created events so the
+ * caller can mirror them to Google.
  */
 export async function applyWindDownSchedule(
   db: Db,
   blocks: Array<{ todoId: string; startsAt: string; endsAt: string }>,
-): Promise<number> {
+): Promise<WindDownEvent[]> {
   return db.transaction(async (tx) => {
-    let count = 0;
+    const created: WindDownEvent[] = [];
 
     for (const block of blocks) {
       const startsAt = new Date(block.startsAt);
       const endsAt = new Date(block.endsAt);
 
-      if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+      if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) {
         continue;
       }
 
-      await tx
-        .update(todos)
-        .set({ scheduledStart: startsAt, scheduledEnd: endsAt })
-        .where(eq(todos.id, block.todoId));
+      const todo = await getTodoById(tx, block.todoId);
+      if (!todo) continue;
+
+      const event = await createEvent(tx, {
+        title: todo.title,
+        startsAt,
+        endsAt,
+        projectId: todo.projectId,
+      });
 
       await logActivity(tx, {
         action: "schedule",
-        entityType: "todo",
-        entityId: block.todoId,
-        payload: { startsAt: block.startsAt, endsAt: block.endsAt },
+        entityType: "event",
+        entityId: event.id,
+        payload: { todoId: block.todoId, startsAt: block.startsAt, endsAt: block.endsAt },
       });
 
-      count += 1;
+      created.push({ id: event.id, title: event.title, startsAt: event.startsAt, endsAt: event.endsAt });
     }
 
-    return count;
+    return created;
   });
 }

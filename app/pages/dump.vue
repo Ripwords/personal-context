@@ -82,19 +82,7 @@ async function capture(): Promise<void> {
 <template>
   <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
-    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
-      <NuxtLink
-        to="/"
-        class="text-sm bd-faint hover:text-[var(--bd-text)]
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
-               motion-safe:transition-colors"
-        aria-label="Back to calendar"
-      >
-        ← Calendar
-      </NuxtLink>
-      <h1 class="text-sm font-medium bd-muted">Braindump</h1>
-      <div class="w-20" aria-hidden="true" />
-    </header>
+    <AppHeader title="Brain dump" />
 
     <!-- Body -->
     <main class="flex-1 flex flex-col items-center px-4 py-10 gap-8 max-w-2xl mx-auto w-full">
@@ -132,8 +120,8 @@ async function capture(): Promise<void> {
           <button
             type="button"
             :disabled="loading || !text.trim()"
-            class="px-4 py-2 rounded text-sm font-medium bg-neutral-700 text-white
-                   hover:bg-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed
+            class="px-4 py-2 rounded text-sm font-medium bg-[var(--bd-surface-2)] bd-text
+                   hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed
                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bd-bg)]
                    motion-safe:transition-colors"
             @click="capture"

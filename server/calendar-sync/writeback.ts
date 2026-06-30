@@ -15,36 +15,21 @@ export type WritebackItem = {
 };
 
 /**
- * Resolve which AI-created items should be mirrored to Google: every created
- * event, plus every created todo that has a scheduled time. Reads the times
- * back from the DB by id (the extraction result only carries id + title).
+ * Resolve which AI-created items should be mirrored to Google: only events.
+ * Timed todos are REMINDERS — they fire local notifications and are deliberately
+ * NOT written to Google (events own the calendar, reminders own notifications).
  */
 export async function resolveWritebackItems(
   db: Db,
   createdIds: { kind: "todo" | "event"; id: string }[],
 ): Promise<WritebackItem[]> {
   const eventIds = createdIds.filter((c) => c.kind === "event").map((c) => c.id);
-  const todoIds = createdIds.filter((c) => c.kind === "todo").map((c) => c.id);
   const out: WritebackItem[] = [];
 
   if (eventIds.length > 0) {
     const rows = await db.select().from(events).where(inArray(events.id, eventIds));
     for (const r of rows) {
       out.push({ kind: "event", id: r.id, title: r.title, startsAt: r.startsAt, endsAt: r.endsAt });
-    }
-  }
-  if (todoIds.length > 0) {
-    const rows = await db.select().from(todos).where(inArray(todos.id, todoIds));
-    for (const r of rows) {
-      if (r.scheduledStart) {
-        out.push({
-          kind: "todo",
-          id: r.id,
-          title: r.title,
-          startsAt: r.scheduledStart,
-          endsAt: r.scheduledEnd ?? new Date(r.scheduledStart.getTime() + 30 * 60_000),
-        });
-      }
     }
   }
   return out;
@@ -80,6 +65,11 @@ export function makeBraindumpMirror(
         .update(events)
         .set({ googleEventId: gid, googleAccountId: conn.accountId, calendarId: cal, syncStatus: "synced" })
         .where(eq(events.id, item.id));
+    } else {
+      await db
+        .update(todos)
+        .set({ googleEventId: gid, googleAccountId: conn.accountId, calendarId: cal, syncStatus: "synced" })
+        .where(eq(todos.id, item.id));
     }
   };
 }

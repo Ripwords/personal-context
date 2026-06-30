@@ -38,6 +38,25 @@ const { data: projectsData } = await useFetch<Project[]>("/api/projects", {
 const projects = computed<Project[]>(() => projectsData.value ?? []);
 const activeProjectIds = ref<Set<string>>(new Set());
 
+// ── Reminders (timed todos — notify instead of occupying the calendar) ──────
+interface Reminder { id: string; title: string; remindAt: string }
+const { data: remindersData, refresh: refreshReminders } = await useFetch<Reminder[]>("/api/reminders", {
+  default: () => [] as Reminder[],
+  onResponseError() { /* rail tolerates an empty list */ },
+});
+const reminders = computed<Reminder[]>(() => remindersData.value ?? []);
+
+function formatReminderTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+
+// After any AI change (copilot/dump) refresh both the calendar and the reminders.
+async function refreshAll(): Promise<void> {
+  await Promise.all([reload(), refreshReminders()]);
+}
+
 function toggleProject(id: string): void {
   const next = new Set(activeProjectIds.value);
   if (next.has(id)) next.delete(id);
@@ -106,7 +125,7 @@ async function submitDump(): Promise<void> {
       body: { text, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     });
     dumpText.value = "";
-    await reload();
+    await refreshAll();
     const todos = res.created.filter((c) => c.kind === "todo").length;
     const events = res.created.filter((c) => c.kind === "event").length;
     const parts: string[] = [];
@@ -138,17 +157,7 @@ async function submitDump(): Promise<void> {
   }
 }
 
-// ── Header / overflow menu ──────────────────────────────────────────────────
-
-const menuOpen = ref(false);
-const navLinks = [
-  { to: "/chat", label: "Chat" },
-  { to: "/wind-down", label: "Wind down" },
-  { to: "/memories", label: "Memory" },
-  { to: "/documents", label: "Documents" },
-  { to: "/analytics", label: "Analytics" },
-  { to: "/settings", label: "Settings" },
-];
+// ── Sign-out (also used by the "not synced" reauth toast action) ────────────
 
 async function handleSignOut(): Promise<void> {
   await authClient.signOut();
@@ -222,28 +231,8 @@ const monthTitle = computed(() =>
         >{{ mode }}</button>
       </div>
 
-      <!-- Overflow menu -->
-      <div class="relative shrink-0">
-        <button
-          type="button" aria-label="Menu" @click="menuOpen = !menuOpen"
-          class="w-8 h-8 flex items-center justify-center rounded-full bd-surface-2 bd-text text-sm
-                 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
-        >⋯</button>
-        <template v-if="menuOpen">
-          <div class="fixed inset-0 z-10" @click="menuOpen = false" />
-          <div class="absolute right-0 mt-1 w-44 z-20 rounded-lg border bd-border bd-surface py-1 shadow-xl shadow-black/40">
-            <NuxtLink
-              v-for="l in navLinks" :key="l.to" :to="l.to" @click="menuOpen = false"
-              class="block px-3 py-1.5 text-sm bd-muted hover:text-[var(--bd-text)] bd-hover motion-safe:transition-colors"
-            >{{ l.label }}</NuxtLink>
-            <div class="my-1 border-t bd-border" />
-            <button
-              type="button" @click="handleSignOut"
-              class="block w-full text-left px-3 py-1.5 text-sm bd-muted hover:text-[var(--bd-text)] bd-hover motion-safe:transition-colors"
-            >Sign out</button>
-          </div>
-        </template>
-      </div>
+      <!-- Overflow / navigation menu -->
+      <AppNavMenu />
     </header>
 
     <!-- ── Three-pane body ─────────────────────────────────────────────────── -->
@@ -299,8 +288,26 @@ const monthTitle = computed(() =>
         </template>
       </main>
 
-      <!-- Right rail: unscheduled todos -->
-      <aside class="w-56 shrink-0 border-l bd-border bd-surface overflow-y-auto">
+      <!-- Right rail: reminders + unscheduled todos -->
+      <aside class="w-56 shrink-0 border-l bd-border bd-surface overflow-y-auto flex flex-col">
+        <!-- Reminders (timed todos) — notify, never gridded -->
+        <section v-if="reminders.length > 0" class="border-b bd-border p-3 flex flex-col gap-2">
+          <h2 class="text-[11px] font-semibold tracking-widest uppercase bd-faint">Reminders</h2>
+          <ul class="flex flex-col gap-1">
+            <li
+              v-for="r in reminders"
+              :key="r.id"
+              class="flex items-start gap-2 px-2 py-1.5 rounded border bd-border bd-bg"
+            >
+              <span aria-hidden="true" class="text-xs leading-5">🔔</span>
+              <div class="flex flex-col min-w-0">
+                <span class="text-sm bd-text truncate">{{ r.title }}</span>
+                <span class="text-[11px] bd-faint tabular-nums">{{ formatReminderTime(r.remindAt) }}</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
         <UnscheduledRail
           :todos="unscheduledTodos"
           :project-color-map="projectColorMap"
@@ -309,5 +316,8 @@ const monthTitle = computed(() =>
         />
       </aside>
     </div>
+
+    <!-- Conversational copilot — refreshes the timeline + reminders after any change -->
+    <CalendarCopilot @changed="refreshAll" />
   </div>
 </template>

@@ -1,25 +1,32 @@
 import { generateText, stepCountIs } from "ai";
 import type { LanguageModel } from "ai";
 import type { Db, DbOrTx } from "../db/client";
-import type { Project, EventRow } from "../db/schema";
+import type { Project } from "../db/schema";
 import {
   createDump,
   createTodo,
   createEvent,
   logActivity,
-  findEventsByTitle,
-  deleteEvent,
-  updateEvent,
+  findCalendarItemsByTitle,
+  resolveCalendarItemById,
+  type CalendarItemKind,
+  type CalendarItemTarget,
 } from "../db/queries/items";
 import { listProjects } from "../db/queries/projects";
 import { extractionTools } from "./tools";
 import type { TodoToolInput, EventToolInput, DeleteEventToolInput, UpdateEventToolInput } from "./tools";
+import {
+  deleteCalendarItem,
+  updateCalendarItem,
+  type CalendarMutationDeps,
+} from "../calendar-sync/mutations";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 /** An event affected by a delete/update, carrying its Google identity so the
  * dump endpoint can mirror the change to Google. */
 export type AffectedEvent = {
+  kind: "event" | "todo";
   id: string;
   title: string;
   startsAt: string;
@@ -45,12 +52,15 @@ export type ExtractResult = {
 
 export type CreatedItem = ExtractResult["created"][number];
 
-function toAffected(e: EventRow): AffectedEvent {
+function toAffected(e: { kind: "event" | "todo"; id: string; title: string; startsAt?: Date; endsAt?: Date; scheduledStart?: Date | null; scheduledEnd?: Date | null; createdAt: Date; googleEventId: string | null; googleAccountId: string | null; calendarId: string | null }): AffectedEvent {
+  const startsAt = e.kind === "event" ? e.startsAt! : (e.scheduledStart ?? e.createdAt);
+  const endsAt = e.kind === "event" ? e.endsAt! : (e.scheduledEnd ?? new Date(startsAt.getTime() + 30 * 60_000));
   return {
+    kind: e.kind,
     id: e.id,
     title: e.title,
-    startsAt: e.startsAt.toISOString(),
-    endsAt: e.endsAt.toISOString(),
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
     googleEventId: e.googleEventId,
     googleAccountId: e.googleAccountId,
     calendarId: e.calendarId,
@@ -79,17 +89,13 @@ export async function createTodoFromInput(
   const projectId = resolveProject(inp.project, projects);
   const lowConfidence = inp.confidence !== undefined && inp.confidence < 0.5;
 
-  // A todo with a specific time (e.g. "remind me at 2pm") gets scheduled so it
-  // lands on the calendar grid (and can be mirrored to Google).
+  // A reminder carries a notify-at time in `scheduledStart` (a reminder is a
+  // point in time, so there is no end). It fires a browser notification and is
+  // never gridded or mirrored to Google. Plain todos have no time.
   let scheduledStart: Date | undefined;
-  let scheduledEnd: Date | undefined;
-  if (inp.scheduledStart) {
-    const s = new Date(inp.scheduledStart);
-    if (!Number.isNaN(s.getTime())) {
-      scheduledStart = s;
-      const e = inp.scheduledEnd ? new Date(inp.scheduledEnd) : null;
-      scheduledEnd = e && !Number.isNaN(e.getTime()) ? e : new Date(s.getTime() + 30 * 60_000);
-    }
+  if (inp.remindAt) {
+    const s = new Date(inp.remindAt);
+    if (!Number.isNaN(s.getTime())) scheduledStart = s;
   }
 
   const todo = await createTodo(db, {
@@ -97,7 +103,6 @@ export async function createTodoFromInput(
     notes: inp.notes ?? null,
     projectId,
     scheduledStart,
-    scheduledEnd,
     source: "ai",
     confidence: inp.confidence ?? null,
     dumpId: dumpId ?? undefined,
@@ -132,7 +137,7 @@ export async function createEventFromInput(
 ): Promise<CreatedItem | null> {
   const startsAt = new Date(inp.startsAt);
   const endsAt = new Date(inp.endsAt);
-  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt.getTime() <= startsAt.getTime()) {
     return null;
   }
 
@@ -177,55 +182,91 @@ export async function applyToolCalls(
   dumpId: string,
   calls: ReadonlyArray<{ toolName: string; input: unknown }>,
   projects: ReadonlyArray<Project>,
+  mutationDeps: CalendarMutationDeps = {},
 ): Promise<Pick<ExtractResult, "created" | "deleted" | "updated">> {
   return db.transaction(async (tx) => {
     const created: ExtractResult["created"] = [];
     const deleted: AffectedEvent[] = [];
     const updated: AffectedEvent[] = [];
 
+    async function resolveTargets(input: {
+      id?: string;
+      kind?: CalendarItemKind;
+      title?: string;
+      from?: string;
+      to?: string;
+    }): Promise<CalendarItemTarget[]> {
+      if (input.id && input.kind) {
+        const target = await resolveCalendarItemById(tx, input.kind, input.id);
+        return target ? [target] : [];
+      }
+      if (!input.title?.trim()) return [];
+      return findCalendarItemsByTitle(
+        tx,
+        input.title,
+        input.from ? new Date(input.from) : undefined,
+        input.to ? new Date(input.to) : undefined,
+      );
+    }
+
+    // Guardrail: models occasionally emit the same create_* tool call twice in
+    // one response (e.g. "lunch at 1pm" → two identical Lunch events). Collapse
+    // duplicate create calls that target the same title + time slot so a single
+    // request can't silently fan out into multiple rows.
+    const seenCreateKeys = new Set<string>();
+
     for (const call of calls) {
       if (call.toolName === "create_todo") {
         const inp = call.input as TodoToolInput;
+        const key = createKey("todo", inp.title, inp.remindAt);
+        if (seenCreateKeys.has(key)) continue;
         created.push(await createTodoFromInput(tx, inp, projects, dumpId));
+        seenCreateKeys.add(key);
       } else if (call.toolName === "create_event") {
         const inp = call.input as EventToolInput;
+        const key = createKey("event", inp.title, inp.startsAt);
+        if (seenCreateKeys.has(key)) continue;
         const item = await createEventFromInput(tx, inp, projects, dumpId);
-        if (item !== null) created.push(item);
+        if (item !== null) {
+          created.push(item);
+          seenCreateKeys.add(key);
+        }
       } else if (call.toolName === "delete_event") {
         const inp = call.input as DeleteEventToolInput;
-        const matches = await findEventsByTitle(
-          tx,
-          inp.title,
-          inp.from ? new Date(inp.from) : undefined,
-          inp.to ? new Date(inp.to) : undefined,
-        );
-        // One-shot dump: remove every clear match (handles exact-title duplicates).
-        for (const ev of matches) {
-          const removed = await deleteEvent(tx, ev.id);
-          if (removed) {
-            deleted.push(toAffected(removed));
-            await logActivity(tx, { action: "delete", entityType: "event", entityId: removed.id, payload: { title: removed.title } });
+        const matches = await resolveTargets(inp);
+        // Destructive one-shot dump actions must be unambiguous. If multiple
+        // items match the title/date, do nothing and let the assistant ask a
+        // clarification in chat-style flows.
+        if (matches.length === 1) {
+          const removed = await deleteCalendarItem(tx, matches[0]!, mutationDeps);
+          if (removed.ok) {
+            deleted.push(toAffected(removed.item));
+            await logActivity(tx, {
+              action: "delete",
+              entityType: removed.item.kind,
+              entityId: removed.item.id,
+              payload: { title: removed.item.title, googleSync: removed.googleSync },
+            });
           }
         }
       } else if (call.toolName === "update_event") {
         const inp = call.input as UpdateEventToolInput;
-        const matches = await findEventsByTitle(
-          tx,
-          inp.title,
-          inp.from ? new Date(inp.from) : undefined,
-          inp.to ? new Date(inp.to) : undefined,
-        );
+        const matches = await resolveTargets(inp);
         // Only update an unambiguous single match — avoid mass-editing.
         if (matches.length === 1) {
-          const target = matches[0]!;
-          const next = await updateEvent(tx, target.id, {
+          const next = await updateCalendarItem(tx, matches[0]!, {
             title: inp.newTitle,
             startsAt: inp.newStartsAt ? new Date(inp.newStartsAt) : undefined,
             endsAt: inp.newEndsAt ? new Date(inp.newEndsAt) : undefined,
-          });
-          if (next) {
-            updated.push(toAffected(next));
-            await logActivity(tx, { action: "update", entityType: "event", entityId: next.id, payload: { title: next.title } });
+          }, mutationDeps);
+          if (next.ok) {
+            updated.push(toAffected(next.item));
+            await logActivity(tx, {
+              action: "update",
+              entityType: next.item.kind,
+              entityId: next.item.id,
+              payload: { title: next.item.title, googleSync: next.googleSync },
+            });
           }
         }
       }
@@ -242,6 +283,7 @@ export async function extractFromDump(
   model: LanguageModel,
   text: string,
   timeZone?: string,
+  mutationDeps: CalendarMutationDeps = {},
 ): Promise<ExtractResult> {
   const projects = await listProjects(db);
   const dump = await createDump(db, text);
@@ -260,18 +302,23 @@ export async function extractFromDump(
 
 The current local datetime is ${now.toLocaleString("en-US", { timeZone: timezone, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} (timezone ${timezone}). Resolve all relative dates and times (today, tomorrow, Friday, this weekend, 3pm) against it, and output absolute ISO 8601 datetimes.
 
-Interpret the user's intent and call the right tool:
-- New tasks/events they mention → create_todo / create_event.
-- "remove", "cancel", "delete", "drop" an existing event → delete_event (match by title, plus from/to if a date is named). NEVER create an event to represent a removal.
-- "move", "reschedule", "rename", "change" an existing event → update_event (find by title, set newTitle and/or newStartsAt/newEndsAt).
+Interpret the user's intent and call the right tool. Three kinds of item:
+- EVENT (create_event): a calendar block — meeting, appointment, call, or anything with other people, a place, or a span of time. Goes on the calendar.
+- REMINDER (create_todo with remindAt): a personal nudge to be notified about at a specific time ("remind me to take meds at 8", "ping me at 2"). Fires a notification; NOT on the calendar.
+- PLAIN TODO (create_todo, no remindAt): a task with no specific time. A casually-mentioned rough day/time goes in notes, not remindAt.
+- This is a one-shot extraction (you cannot ask questions). When unsure event-vs-reminder, pick the most likely and set a lower confidence so it is flagged for review.
+- "remove", "cancel", "delete", "drop" an existing calendar item → delete_event (match by title, plus from/to if a date is named). NEVER create an event to represent a removal.
+- "move", "reschedule", "rename", "change" an existing calendar item → update_event (find by title, set newTitle and/or newStartsAt/newEndsAt). Never create a duplicate to represent an edit.
 
 For each created item:
 - Pick the best-matching project name from this list (case-insensitive): ${projectNames}
   If no project fits, omit the project field.
-- For events, set realistic ISO 8601 start and end datetimes based on context clues (default to tomorrow if no time mentioned).
+- For events, require a clear date and start time (or enough context to infer both confidently). If date/time is missing or ambiguous, do not create an event.
+- Event endsAt must be after startsAt. Use a normal duration (30-60 minutes) when the end time is not stated.
 - Set confidence (0..1) reflecting how certain you are this is a genuine todo or event.
 
-Only call tools for things clearly implied by the text. Do not invent items.`;
+Only call tools for things clearly implied by the text. Do not invent items.
+Create each item exactly once. Never emit two create_event/create_todo calls for the same item — one mention of "lunch at 1pm" is ONE event, not two.`;
 
   const result = await generateText({
     model,
@@ -286,12 +333,29 @@ Only call tools for things clearly implied by the text. Do not invent items.`;
     dump.id,
     result.toolCalls as ToolCall[],
     projects,
+    mutationDeps,
   );
 
   return { dumpId: dump.id, created, deleted, updated };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Dedup key for a create_* call: kind + normalized title + time slot. Two calls
+ * that target the same title and the same start instant are treated as the same
+ * item, regardless of casing/whitespace or a differing end time. An undefined
+ * time (anytime todo) folds into a single "none" slot per title.
+ */
+export function createKey(
+  kind: "todo" | "event",
+  title: string,
+  start: string | undefined,
+): string {
+  const normTitle = title.trim().toLowerCase().replace(/\s+/g, " ");
+  const slot = start ? new Date(start).getTime() : "none";
+  return `${kind} ${normTitle} ${slot}`;
+}
 
 function resolveProject(
   name: string | undefined,

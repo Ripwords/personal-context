@@ -135,19 +135,7 @@ function relativeTime(iso: string): string {
 <template>
   <div class="min-h-dvh bd-bg bd-text flex flex-col">
     <!-- Header -->
-    <header class="flex items-center justify-between px-4 py-2 border-b bd-border bd-surface shrink-0">
-      <NuxtLink
-        to="/"
-        class="text-sm bd-faint hover:text-[var(--bd-text)]
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 rounded
-               motion-safe:transition-colors"
-        aria-label="Back to calendar"
-      >
-        ← Calendar
-      </NuxtLink>
-      <h1 class="text-sm font-medium bd-muted">Memory</h1>
-      <div class="w-20" aria-hidden="true" />
-    </header>
+    <AppHeader title="Memory" />
 
     <!-- Body -->
     <main class="flex-1 flex flex-col items-center px-4 py-10 gap-8 max-w-2xl mx-auto w-full">

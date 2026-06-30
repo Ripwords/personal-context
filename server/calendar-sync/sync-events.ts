@@ -1,6 +1,6 @@
 // server/calendar-sync/sync-events.ts
-import { eq } from "drizzle-orm";
-import { type Db } from "../db/client";
+import { and, eq, gte, isNotNull, lt, notInArray } from "drizzle-orm";
+import { type Db, type DbOrTx } from "../db/client";
 import { events, googleCalendar, type NewEventRow } from "../db/schema";
 import type { GoogleCreds } from "../auth/google-credentials";
 
@@ -63,6 +63,33 @@ export function normalizeEvent(
   };
 }
 
+/**
+ * Reflect Google-side deletions locally: remove previously-synced rows in this
+ * calendar+window whose Google copy is no longer present. Scoped tightly so we
+ * never touch local-only events (syncStatus 'local', no googleEventId) or events
+ * outside the queried window — an empty `presentIds` means Google returned
+ * nothing for the window, so every synced row in it should go.
+ */
+async function reconcileDeletions(
+  tx: DbOrTx,
+  accountId: string,
+  calendarId: string,
+  from: Date,
+  to: Date,
+  presentIds: string[],
+): Promise<void> {
+  const conditions = [
+    eq(events.googleAccountId, accountId),
+    eq(events.calendarId, calendarId),
+    eq(events.syncStatus, "synced"),
+    isNotNull(events.googleEventId),
+    gte(events.startsAt, from),
+    lt(events.startsAt, to),
+  ];
+  if (presentIds.length > 0) conditions.push(notInArray(events.googleEventId, presentIds));
+  await tx.delete(events).where(and(...conditions));
+}
+
 export async function syncConnectionEvents(
   db: Db,
   conn: GoogleCreds,
@@ -78,14 +105,17 @@ export async function syncConnectionEvents(
     timeMin: from.toISOString(),
     timeMax: to.toISOString(),
   });
+  // Every id Google returned for the window — the deletion reconciler keeps these.
+  const presentIds = raw.map((e) => e.id);
   const rows = raw
     .map((e) => normalizeEvent(e, conn.accountId, calendarId))
     .filter((r): r is NewEventRow => r !== null);
-  if (rows.length === 0) return 0;
 
-  // node-postgres supports interactive transactions — wrap the upserts so a
-  // sync either fully lands or rolls back.
+  // node-postgres supports interactive transactions — reconcile deletions and
+  // upsert together so a sync either fully lands or rolls back. Reconciliation
+  // runs even when Google returns nothing, so a fully-cleared window clears here.
   await db.transaction(async (tx) => {
+    await reconcileDeletions(tx, conn.accountId, calendarId, from, to, presentIds);
     for (const row of rows) {
       await tx
         .insert(events)
@@ -157,9 +187,22 @@ export async function syncAllCalendars(
   let total = 0;
   for (const cal of calendars) {
     if (!visibleIds.has(cal.id)) continue;
-    // The Braindump calendar is write-only from the app's side — the AI items it
-    // holds already live locally, so reading them back would double them up.
-    if (conn.braindumpCalendarId && cal.id === conn.braindumpCalendarId) continue;
+    // The Braindump calendar's content is write-only from the app's side — its
+    // AI items already live locally, so reading them back would double them up.
+    // We still reconcile *deletions* (deletion-only, no insert) so removing an AI
+    // event in another client removes it here too.
+    if (conn.braindumpCalendarId && cal.id === conn.braindumpCalendarId) {
+      const raw = await eventsApi.list({
+        accessToken,
+        calendarId: cal.id,
+        timeMin: from.toISOString(),
+        timeMax: to.toISOString(),
+      });
+      await db.transaction((tx) =>
+        reconcileDeletions(tx, conn.accountId, cal.id, from, to, raw.map((e) => e.id)),
+      );
+      continue;
+    }
     total += await syncConnectionEvents(db, conn, accessToken, eventsApi, from, to, cal.id);
   }
   return total;

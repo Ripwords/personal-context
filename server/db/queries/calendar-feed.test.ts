@@ -7,15 +7,16 @@ import { googleCalendar, events as eventsTable } from "../schema";
 const db = getTestDb();
 beforeEach(async () => { await truncateAll(db); });
 
-test("aggregates events, scheduled todos in range, and unscheduled todos", async () => {
+test("aggregates events and unscheduled todos; reminders (timed todos) are NOT gridded", async () => {
   await createEvent(db, { title: "ev", startsAt: new Date("2026-07-01T09:00:00Z"), endsAt: new Date("2026-07-01T10:00:00Z") });
-  await createTodo(db, { title: "sched", scheduledStart: new Date("2026-07-01T11:00:00Z"), scheduledEnd: new Date("2026-07-01T12:00:00Z") });
+  // A timed todo is a reminder now — it fires a notification, not a grid slot.
+  await createTodo(db, { title: "reminder", scheduledStart: new Date("2026-07-01T11:00:00Z") });
   await createTodo(db, { title: "unsched" });
   await createEvent(db, { title: "next-week", startsAt: new Date("2026-07-09T09:00:00Z"), endsAt: new Date("2026-07-09T10:00:00Z") });
 
   const feed = await getCalendarFeed(db, new Date("2026-07-01T00:00:00Z"), new Date("2026-07-02T00:00:00Z"));
   expect(feed.events.map((e) => e.title)).toEqual(["ev"]);
-  expect(feed.scheduledTodos.map((t) => t.title)).toEqual(["sched"]);
+  expect(feed.scheduledTodos).toEqual([]); // reminders never grid
   expect(feed.unscheduledTodos.map((t) => t.title)).toEqual(["unsched"]);
 });
 
