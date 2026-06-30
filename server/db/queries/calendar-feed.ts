@@ -1,4 +1,4 @@
-import { and, gte, lt, isNull, or, eq } from "drizzle-orm";
+import { and, gt, lt, isNull, or, eq } from "drizzle-orm";
 import { type Db } from "../client";
 import { events, googleCalendar, type Todo } from "../schema";
 import { listUnscheduledTodos } from "./items";
@@ -24,8 +24,10 @@ export type CalendarFeed = {
 };
 
 /**
- * Events that start within [from, to), enriched with their Google calendar's
- * color, excluding events whose calendar the user has toggled off. Local/AI
+ * Events that OVERLAP [from, to) — i.e. start before `to` and end after `from`
+ * — enriched with their Google calendar's color, excluding events whose calendar
+ * the user has toggled off. Overlap (not start-within) so events that span
+ * midnight or run multiple days still appear on every day they cover. Local/AI
  * events (no calendarId) are always included.
  */
 export async function listFeedEventsInRange(db: Db, from: Date, to: Date): Promise<FeedEvent[]> {
@@ -49,8 +51,8 @@ export async function listFeedEventsInRange(db: Db, from: Date, to: Date): Promi
     )
     .where(
       and(
-        gte(events.startsAt, from),
         lt(events.startsAt, to),
+        gt(events.endsAt, from),
         // Show an event unless its calendar is EXPLICITLY toggled off. Local/AI
         // events (no calendarId) and events whose calendar metadata hasn't synced
         // yet both have a NULL selected → they stay visible.

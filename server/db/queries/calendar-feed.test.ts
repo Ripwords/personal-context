@@ -20,6 +20,21 @@ test("aggregates events and unscheduled todos; reminders (timed todos) are NOT g
   expect(feed.unscheduledTodos.map((t) => t.title)).toEqual(["unsched"]);
 });
 
+test("includes events that overlap the window but start before it (spanning midnight / multi-day)", async () => {
+  // Starts the previous night, ends inside the window — must appear.
+  await createEvent(db, { title: "overnight", startsAt: new Date("2026-06-30T23:00:00Z"), endsAt: new Date("2026-07-01T01:00:00Z") });
+  // Multi-day event spanning the entire window (starts before, ends after).
+  await createEvent(db, { title: "multiday", startsAt: new Date("2026-06-29T00:00:00Z"), endsAt: new Date("2026-07-05T00:00:00Z") });
+  // Ends exactly at `from` — does NOT overlap [from, to), must be excluded.
+  await createEvent(db, { title: "ended-before", startsAt: new Date("2026-06-30T22:00:00Z"), endsAt: new Date("2026-07-01T00:00:00Z") });
+
+  const feed = await getCalendarFeed(db, new Date("2026-07-01T00:00:00Z"), new Date("2026-07-02T00:00:00Z"));
+  const titles = feed.events.map((e) => e.title);
+  expect(titles).toContain("overnight");
+  expect(titles).toContain("multiday");
+  expect(titles).not.toContain("ended-before");
+});
+
 test("splits all-day events, attaches calendar color, and hides deselected calendars", async () => {
   await db.insert(googleCalendar).values([
     { accountId: "acc1", calendarId: "primary", summary: "Me", backgroundColor: "#4986e7", selected: true },

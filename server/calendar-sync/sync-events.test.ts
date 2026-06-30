@@ -126,12 +126,18 @@ test("syncConnectionEvents reconciles deletions even when Google returns an empt
     title: "Outside", startsAt: new Date("2026-07-05T09:00:00Z"), endsAt: new Date("2026-07-05T10:00:00Z"),
     googleEventId: "gOut", googleAccountId: "acc1", calendarId: "primary", syncStatus: "synced",
   });
+  // A synced event that STARTS before the window but OVERLAPS it (spans midnight),
+  // whose Google copy was removed — reconciliation must reach it via overlap.
+  await db.insert(eventsTable).values({
+    title: "Overnight", startsAt: new Date("2026-06-30T23:00:00Z"), endsAt: new Date("2026-07-01T01:00:00Z"),
+    googleEventId: "gOver", googleAccountId: "acc1", calendarId: "primary", syncStatus: "synced",
+  });
 
   const apiEmpty: EventsApi = { list: async () => [] };
   await syncConnectionEvents(db, conn, "at", apiEmpty, from, to, "primary");
 
   const titles = (await db.select().from(eventsTable)).map((r) => r.title).sort();
-  expect(titles).toEqual(["Local only", "Outside"]); // "Gone" removed; the other two preserved
+  expect(titles).toEqual(["Local only", "Outside"]); // "Gone" + "Overnight" removed; the other two preserved
 });
 
 test("syncAllCalendars reflects deletions from the Braindump calendar (deletion-only, no re-insert)", async () => {

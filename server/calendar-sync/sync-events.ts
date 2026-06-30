@@ -1,5 +1,5 @@
 // server/calendar-sync/sync-events.ts
-import { and, eq, gte, isNotNull, lt, notInArray } from "drizzle-orm";
+import { and, eq, gt, isNotNull, lt, notInArray } from "drizzle-orm";
 import { type Db, type DbOrTx } from "../db/client";
 import { events, googleCalendar, type NewEventRow } from "../db/schema";
 import type { GoogleCreds } from "../auth/google-credentials";
@@ -83,8 +83,11 @@ async function reconcileDeletions(
     eq(events.calendarId, calendarId),
     eq(events.syncStatus, "synced"),
     isNotNull(events.googleEventId),
-    gte(events.startsAt, from),
+    // Overlap, not start-within: Google's list (timeMin/timeMax) returns events
+    // that overlap the window, so reconciliation must scope the same way or
+    // spanning/multi-day rows are never matched against `presentIds`.
     lt(events.startsAt, to),
+    gt(events.endsAt, from),
   ];
   if (presentIds.length > 0) conditions.push(notInArray(events.googleEventId, presentIds));
   await tx.delete(events).where(and(...conditions));
