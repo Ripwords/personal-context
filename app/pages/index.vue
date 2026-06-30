@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import type { Project } from "~/components/ProjectRail.vue";
 import type CalendarTimeline from "~/components/CalendarTimeline.vue";
+import CalendarDayView from "~/components/CalendarDayView.vue";
+import CalendarMonthView from "~/components/CalendarMonthView.vue";
 import { useCalendarFeed } from "~/composables/useCalendarFeed";
+import { startOfWeek, addDays } from "~/composables/useWeek";
 import { authClient } from "~/lib/auth-client";
 
 // ── Calendar: lazily-loaded feed feeding the smooth-scrolling timeline ─────
@@ -96,6 +99,65 @@ async function dropTodo(id: string): Promise<void> {
 
 async function completeTodo(id: string): Promise<void> {
   await $fetch(`/api/todos/${id}/complete`, { method: "POST", body: { done: true } });
+  await reload();
+}
+
+// ── Day / month views ──────────────────────────────────────────────────────
+const now = ref<Date>(new Date());
+
+/** UTC-midnight marker for centerDate's local calendar date (day view + columns). */
+const dayMarker = computed(() => {
+  const d = centerDate.value;
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+});
+
+const dayLabel = computed(() =>
+  centerDate.value.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
+);
+const monthLabel = computed(() =>
+  centerDate.value.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+);
+
+function shiftDay(delta: number): void {
+  const d = centerDate.value;
+  centerDate.value = new Date(d.getFullYear(), d.getMonth(), d.getDate() + delta);
+}
+function shiftMonth(delta: number): void {
+  const d = centerDate.value;
+  centerDate.value = new Date(d.getFullYear(), d.getMonth() + delta, 1);
+}
+function goToday(): void {
+  centerDate.value = new Date();
+}
+function openDay(day: Date): void {
+  centerDate.value = day;
+  viewMode.value = "day";
+}
+
+/** Monday markers (UTC) covering the weeks the current day/month view spans. */
+const visibleMondays = computed<Date[]>(() => {
+  if (viewMode.value === "day") return [startOfWeek(dayMarker.value)];
+  if (viewMode.value === "month") {
+    const first = new Date(Date.UTC(centerDate.value.getFullYear(), centerDate.value.getMonth(), 1));
+    const gridStart = startOfWeek(first);
+    return Array.from({ length: 6 }, (_, i) => addDays(gridStart, i * 7));
+  }
+  return [];
+});
+
+// Day/month views read from the same lazily-loaded feed, so make sure the weeks
+// they show are fetched (the week timeline loads its own via the scroll handler).
+watch(
+  [viewMode, visibleMondays],
+  () => { if (viewMode.value !== "week") ensureWeeks(visibleMondays.value); },
+  { immediate: true },
+);
+
+async function scheduleTodo(payload: { id: string; startsAt: string; endsAt: string }): Promise<void> {
+  await $fetch(`/api/todos/${payload.id}/schedule`, {
+    method: "POST",
+    body: { ...payload, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  });
   await reload();
 }
 
@@ -285,11 +347,41 @@ const monthTitle = computed(() =>
         </template>
 
         <template v-else-if="viewMode === 'day'">
-          <div class="flex-1 flex items-center justify-center text-sm bd-faint">Day view coming soon.</div>
+          <div class="flex items-center justify-between px-3 py-2 border-b bd-border shrink-0">
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftDay(-1)">‹</button>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium bd-text">{{ dayLabel }}</span>
+              <button type="button" class="px-2 h-6 text-[11px] rounded border bd-border bd-faint bd-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="goToday">Today</button>
+            </div>
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftDay(1)">›</button>
+          </div>
+          <CalendarDayView
+            :day="dayMarker"
+            :events="events"
+            :scheduled-todos="scheduledTodos"
+            :project-color-map="projectColorMap"
+            :today="now"
+            @schedule-todo="scheduleTodo"
+          />
         </template>
 
         <template v-else>
-          <div class="flex-1 flex items-center justify-center text-sm bd-faint">Month view coming soon.</div>
+          <div class="flex items-center justify-between px-3 py-2 border-b bd-border shrink-0">
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftMonth(-1)">‹</button>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium bd-text">{{ monthLabel }}</span>
+              <button type="button" class="px-2 h-6 text-[11px] rounded border bd-border bd-faint bd-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="goToday">Today</button>
+            </div>
+            <button type="button" class="px-2 h-7 text-xs rounded bd-hover bd-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500" @click="shiftMonth(1)">›</button>
+          </div>
+          <CalendarMonthView
+            :month-anchor="centerDate"
+            :events="events"
+            :scheduled-todos="scheduledTodos"
+            :project-color-map="projectColorMap"
+            :today="now"
+            @select-day="openDay"
+          />
         </template>
       </main>
 

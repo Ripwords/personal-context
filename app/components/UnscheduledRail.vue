@@ -16,6 +16,12 @@ const emit = defineEmits<{
   complete: [id: string];
   "clear-all": [];
 }>();
+
+// Drag-to-schedule: carry the todo id; the calendar grid reads it on drop.
+function onDragStart(e: DragEvent, id: string): void {
+  e.dataTransfer?.setData("application/x-braindump-todo", id);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
 </script>
 
 <template>
@@ -40,8 +46,10 @@ const emit = defineEmits<{
       <li
         v-for="todo in todos"
         :key="todo.id"
+        draggable="true"
         class="group flex items-start gap-2 rounded border bd-border bd-surface-2 px-3 py-2
-               text-sm bd-text cursor-default select-none"
+               text-sm bd-text cursor-grab active:cursor-grabbing select-none"
+        @dragstart="onDragStart($event, todo.id)"
       >
         <!-- complete checkbox -->
         <button
