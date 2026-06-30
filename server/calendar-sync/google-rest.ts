@@ -78,6 +78,15 @@ export function makeGoogleCalendarApi(accessToken: string, fetchImpl: typeof fet
       const json = (await res.json()) as { id: string };
       return { id: json.id };
     },
+    async list(): Promise<{ id: string; summary: string }[]> {
+      const res = await fetchImpl(
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=owner&showHidden=true",
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!res.ok) throw new GoogleApiError(res.status, `calendarList failed: ${res.status}`);
+      const json = (await res.json()) as { items?: { id: string; summary?: string }[] };
+      return (json.items ?? []).map((c) => ({ id: c.id, summary: c.summary ?? "" }));
+    },
   };
 }
 

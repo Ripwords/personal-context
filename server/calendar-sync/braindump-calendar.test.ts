@@ -18,6 +18,25 @@ beforeEach(async () => {
   await setConnectionRole(db, "acc1", "personal");
 });
 
+test("reuses an existing 'Braindump' calendar (by name) instead of creating a duplicate", async () => {
+  let inserts = 0;
+  const api = {
+    insert: async ({ summary }: { summary: string }) => { inserts++; return { id: "cal_new" }; },
+    list: async () => [
+      { id: "primary", summary: "Me" },
+      { id: "cal_existing", summary: "Braindump" },
+    ],
+  };
+
+  const [conn] = await getGoogleConnections(db); // no stored braindumpCalendarId yet
+  const id = await ensureBraindumpCalendar(db, conn!, api);
+  expect(id).toBe("cal_existing"); // found the existing one
+  expect(inserts).toBe(0); // did NOT create a duplicate
+
+  const [conn2] = await getGoogleConnections(db); // id is now persisted
+  expect(conn2!.braindumpCalendarId).toBe("cal_existing");
+});
+
 test("creates the calendar once, then reuses the stored id", async () => {
   let inserts = 0;
   const api = { insert: async ({ summary }: { summary: string }) => { inserts++; return { id: "cal_new" }; } };
