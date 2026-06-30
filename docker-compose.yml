@@ -2,7 +2,9 @@ name: braindump
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector image is a drop-in superset of postgres:16 — required for the
+    # optional semantic-memory/RAG path (apply drizzle/optional/pgvector.sql).
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -51,6 +53,9 @@ services:
       S3_BUCKET: ${S3_BUCKET:-}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      EMBEDDINGS_ENABLED: ${EMBEDDINGS_ENABLED:-0}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
@@ -63,6 +68,18 @@ services:
       drizzle-migrate:
         condition: service_completed_successfully
 
+  # Optional embeddings model server. Pull the model once it's up:
+  #   docker compose exec ollama ollama pull nomic-embed-text
+  # Enable with EMBEDDINGS_ENABLED=1 (and apply drizzle/optional/pgvector.sql).
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["embeddings"]
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+
 volumes:
   pgdata:
   uploads:
+  ollama:
