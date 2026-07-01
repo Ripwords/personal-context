@@ -49,6 +49,9 @@ services:
       context: .
       target: migrate
     image: ${IMAGE_REGISTRY:-braindump}/migrate:${IMAGE_TAG:-latest}
+    # Image is built locally (or shipped via docker load) — never try to pull it
+    # from a registry, which only produces a noisy "pull access denied" warning.
+    pull_policy: never
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
@@ -62,6 +65,13 @@ services:
       target: run
     image: ${IMAGE_REGISTRY:-braindump}/app:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    # Built locally / shipped via docker load — never attempt a registry pull.
+    pull_policy: never
+    # Explicit resolvers so outbound calls (e.g. Google OAuth token exchange)
+    # work even when the Docker embedded DNS can't reach the host's resolver.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       # DATABASE_URL is composed from POSTGRES_* and points at the internal
       # `postgres` service — it deliberately overrides any DATABASE_URL in .env
