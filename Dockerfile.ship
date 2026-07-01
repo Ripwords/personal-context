@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+#
+# Thin runtime image built from a PREBUILT .output directory.
+#
+# Why this exists: cross-building linux/amd64 from Apple Silicon runs the
+# Bun/Nuxt bundler under QEMU emulation, which segfaults (SIGILL). So the
+# scripts/build-*.sh helpers run `bun run build` NATIVELY on the host to produce
+# .output (portable, pure-JS, self-contained under .output/server), then build
+# this image — which only COPYies that bundle onto the amd64 Bun base. No code
+# is compiled under emulation here, just a file copy, so it works reliably.
+#
+# The companion Dockerfile.ship.dockerignore whitelists ONLY .output so the
+# build context stays tiny.
+FROM oven/bun:1-alpine AS run
+WORKDIR /app
+COPY .output ./.output
+EXPOSE 3000
+ENV HOST=0.0.0.0 PORT=3000
+CMD ["bun", ".output/server/index.mjs"]

@@ -1,0 +1,136 @@
+# Production self-hosting stack.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences from the dev-oriented docker-compose.yml:
+#   - restart: unless-stopped on every long-running service (survives reboots)
+#   - Postgres/Ollama ports bind to loopback (${*_BIND}) by default, so the DB
+#     and model server are never exposed publicly — only the app port is.
+#   - secrets are interpolated from .env; edit .env, not this compose.
+#   - App container healthcheck hits /api/health.
+#   - Rotating json-file logs so a long-running host doesn't fill the disk.
+#   - Images are tagged ${IMAGE_REGISTRY}/...:${IMAGE_TAG} so you can build
+#     locally OR push/pull from a registry for multi-host deploys.
+#
+# Every port, bind address, and secret is configurable via .env — see
+# .env.example for the full list.
+
+name: ${COMPOSE_PROJECT_NAME:-braindump}
+
+services:
+  postgres:
+    # pgvector image is a drop-in superset of postgres:16 — required for the
+    # optional semantic-memory/RAG path (apply drizzle/optional/pgvector.sql).
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Bound to loopback by default (POSTGRES_BIND=127.0.0.1). Keep this private
+    # unless you intentionally need host/LAN database access.
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  drizzle-migrate:
+    build:
+      context: .
+      target: migrate
+    image: ${IMAGE_REGISTRY:-braindump}/migrate:${IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: run
+    image: ${IMAGE_REGISTRY:-braindump}/app:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # DATABASE_URL is composed from POSTGRES_* and points at the internal
+      # `postgres` service — it deliberately overrides any DATABASE_URL in .env
+      # (which is written for host-based/local dev on localhost).
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      SEARXNG_URL: ${SEARXNG_URL:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      EMBEDDINGS_ENABLED: ${EMBEDDINGS_ENABLED:-0}
+      # App-container URL for Ollama. Use the internal service name by default;
+      # set APP_OLLAMA_URL if you run Ollama somewhere else.
+      OLLAMA_URL: ${APP_OLLAMA_URL:-http://ollama:11434}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
+    # By default the app port binds to all interfaces (APP_BIND=0.0.0.0) so it's
+    # reachable directly. Behind a reverse proxy (nginx/Caddy/Traefik) set
+    # APP_BIND=127.0.0.1 so only the proxy can reach the container.
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
+    volumes:
+      # Durable fallback for document originals when S3 is NOT configured.
+      # (With S3_* set, uploads go to object storage and this is unused.)
+      - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      drizzle-migrate:
+        condition: service_completed_successfully
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional embeddings model server. Pull the model once it's up:
+  #   docker compose -f docker-compose.prod.yml exec ollama ollama pull nomic-embed-text
+  # Enable with EMBEDDINGS_ENABLED=1 (and apply drizzle/optional/pgvector.sql).
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["embeddings"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "${OLLAMA_BIND:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  uploads:
+  ollama:

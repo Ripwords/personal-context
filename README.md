@@ -54,11 +54,17 @@ cp .env.example .env
 | `POSTGRES_PASSWORD` | Postgres password |
 | `POSTGRES_DB` | Postgres database name |
 | `POSTGRES_PORT` | Host port for the Postgres container (default `5432`) |
+| `POSTGRES_BIND` | Host interface for Postgres in `docker-compose.prod.yml` (default `127.0.0.1`; keep private) |
+| `APP_BIND` | Host interface for the app in `docker-compose.prod.yml` (`0.0.0.0` for direct public access, `127.0.0.1` behind a reverse proxy) |
 | `APP_PORT` | Host port for the Nuxt app container (default `3000`) |
+| `OLLAMA_BIND` / `OLLAMA_PORT` | Host interface/port for the optional Ollama embeddings profile (default `127.0.0.1:11434`) |
+| `APP_OLLAMA_URL` | Ollama URL used inside `docker-compose.prod.yml` app container (default `http://ollama:11434`) |
+| `COMPOSE_PROJECT_NAME` | Docker Compose project/volume prefix (default `braindump`) |
+| `IMAGE_REGISTRY` / `IMAGE_TAG` | Optional image names for production builds/pushes (default `braindump/*:latest`) |
 | `DATABASE_URL` | Full Postgres connection URL for the app and migrator |
 | `TEST_DATABASE_URL` | Postgres connection URL for the test suite (points at the local test container on port 5434) |
 | `BETTER_AUTH_SECRET` | Secret key for Better Auth sessions — generate with `openssl rand -base64 32` |
-| `BETTER_AUTH_URL` | Base URL of the app (e.g. `http://localhost:3000`) |
+| `BETTER_AUTH_URL` | Public base URL of the app (e.g. `http://localhost:3000` locally or `https://brain.example.com` in production) |
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 client ID from Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 client secret |
 | `LLM_PROVIDER` | AI provider: `deepseek` (default) or `anthropic` |
@@ -151,6 +157,8 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with Google.
 
 The compose stack runs three services: `postgres` (Postgres 16), `drizzle-migrate` (one-shot migrator), and `app` (Nitro production bundle). The app waits for migrations to complete before starting.
 
+### Local / simple self-hosting
+
 ```bash
 cp .env.example .env
 # edit .env — fill in POSTGRES_PASSWORD, BETTER_AUTH_SECRET, GOOGLE_CLIENT_ID,
@@ -160,6 +168,130 @@ docker compose up -d --build
 ```
 
 The app is then available at `http://localhost:${APP_PORT}` (default 3000).
+
+### Production self-hosting
+
+Use `docker-compose.prod.yml` for a long-running host. It adds restart policies,
+loopback-only Postgres/Ollama binds, app healthchecks, and log rotation.
+
+```bash
+cp .env.example .env
+openssl rand -base64 32  # paste into BETTER_AUTH_SECRET
+```
+
+Edit `.env`:
+
+```dotenv
+# Required production values
+POSTGRES_PASSWORD=<strong-db-password>
+BETTER_AUTH_SECRET=<openssl-output>
+BETTER_AUTH_URL=https://brain.example.com
+GOOGLE_CLIENT_ID=<google-oauth-client-id>
+GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=<deepseek-key>
+
+# Port/bind options
+APP_PORT=3000
+APP_BIND=127.0.0.1      # recommended behind nginx/Caddy/Traefik
+POSTGRES_BIND=127.0.0.1 # keep private
+POSTGRES_PORT=5432
+```
+
+Start the production stack:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps
+```
+
+If you are not using a reverse proxy, expose the app directly instead:
+
+```dotenv
+APP_BIND=0.0.0.0
+APP_PORT=3000
+BETTER_AUTH_URL=http://YOUR_SERVER_IP:3000
+```
+
+For HTTPS, put a reverse proxy in front of the app and keep `APP_BIND=127.0.0.1`.
+Your Google OAuth client must include this redirect URI:
+
+```text
+https://brain.example.com/api/auth/callback/google
+```
+
+Operations:
+
+```bash
+# View logs
+docker compose -f docker-compose.prod.yml logs -f app
+
+# Update after pulling new code
+docker compose -f docker-compose.prod.yml up -d --build
+
+# Stop while keeping data
+docker compose -f docker-compose.prod.yml down
+
+# Backup Postgres
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > braindump-backup.sql
+```
+
+Optional embeddings/RAG:
+
+```bash
+# In .env:
+# EMBEDDINGS_ENABLED=1
+# APP_OLLAMA_URL=http://ollama:11434
+
+EMBEDDINGS_ENABLED=1 docker compose -f docker-compose.prod.yml --profile embeddings up -d --build
+docker compose -f docker-compose.prod.yml exec ollama ollama pull nomic-embed-text
+```
+
+### Build locally, ship to a slow server
+
+If the target server is slow (or has little RAM), don't build on it. Build the
+images on your machine, save them to a tarball, transfer, and `docker load` on
+the server — then bring the stack up with `--no-build`.
+
+Two scripts package images for `linux/amd64` (Apple Silicon → x86 Ubuntu) and
+print the exact transfer/load commands:
+
+```bash
+# app + migrator (use when DB migrations changed)
+./scripts/build-images.sh
+
+# app only (faster; use when only app code changed)
+./scripts/build-app-image.sh
+```
+
+The output tarballs land in `dist/`. Override image names/arch to match the
+server's `.env`:
+
+```bash
+IMAGE_REGISTRY=braindump IMAGE_TAG=latest PLATFORM=linux/amd64 ./scripts/build-images.sh
+```
+
+Implementation detail: the scripts run `bun run build` **natively** first, then
+package the already-built `.output` bundle into a thin target-platform image via
+`Dockerfile.ship`. This avoids running the Bun/Nuxt bundler under QEMU during
+Apple-Silicon → amd64 cross-builds.
+
+Then, following the printed instructions (replace `user@server`):
+
+```bash
+# transfer + load in one stream (no temp file on the server)
+gunzip -c dist/braindump-images.tar.gz | ssh -t user@server 'sudo docker load'
+
+# on the server — recreate WITHOUT building
+ssh user@server
+cd ~/personal-context && git pull --ff-only    # refresh compose + .env
+sudo docker compose -f docker-compose.prod.yml up -d --no-build --force-recreate
+```
+
+The server only ever pulls `postgres` (and optionally `ollama`); the app and
+migrator images come from your tarball. `IMAGE_REGISTRY`/`IMAGE_TAG` in the
+server's `.env` must match the tags you built with.
 
 Postgres data persists in the `pgdata` named volume. To stop:
 
